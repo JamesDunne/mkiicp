@@ -1,18 +1,15 @@
 // triode_preamp_sim.cpp
-// Full nonlinear triode simulation with full analog tone stack emulation for PCM processing
+// Refactored nonlinear 12AX7 simulation with tone stack and full gain structuring from LTspice netlist
 
 #include <cmath>
 #include <algorithm>
-#include <complex>
 #include <iostream>
 
-struct RCFilter {
-    explicit RCFilter(float r, float c) : R(r), C(c) {}
+constexpr float sampleRate = 48000.0f;
 
+struct RCFilter {
     float R, C;
     float v = 0.0f;
-    float sampleRate = 48000.0f;
-
     float process(float input) {
         float alpha = 1.0f / (1.0f + R * C * sampleRate);
         v = alpha * input + (1.0f - alpha) * v;
@@ -21,36 +18,13 @@ struct RCFilter {
 };
 
 struct Triode12AX7 {
-    Triode12AX7(float r_p, float r_k, float c_k, float b_plus, float fs = 48000.0f)
-      : B_plus(b_plus),
-        R_p(r_p),
-        R_k(r_k),
-        C_k(c_k),
-        sampleRate(fs)
-    {}
-
-    constexpr static float MU = 96.2f;
-    constexpr static float EX = 1.437f;
-    constexpr static float KG1 = 613.4f;
-    constexpr static float KP = 740.3f;
-    constexpr static float KVB = 1672.0f;
-
-    float B_plus = 300.0f;
-    float R_p = 100000.0f;
-    float R_k = 1500.0f;
-    float C_k = 0.0f; // Cathode bypass capacitor in Farads
-    float sampleRate = 48000.0f;
-
-    float V_k = 1.0f;
-    float V_ck = 0.0f; // Capacitor voltage (for bypass dynamics)
-
-    constexpr static int max_iter = 20;
-    constexpr static float tol = 1e-4f;
-
+    constexpr static float MU = 96.2f, EX = 1.437f, KG1 = 613.4f, KP = 740.3f, KVB = 1672.0f;
+    float B_plus = 300.0f, R_p = 100000.0f, R_k = 1500.0f, C_k = 0.0f;
+    float V_k = 1.0f, V_ck = 0.0f;
+    int max_iter = 20;
+    float tol = 1e-4f;
     float process(float V_g) {
-        float V_a = B_plus;
-        float V_gk = V_g - V_k;
-
+        float V_a = B_plus, V_gk = V_g - V_k;
         for (int i = 0; i < max_iter; ++i) {
             float f = (B_plus - V_a) / R_p - Ia(V_a, V_gk);
             float dfdVa = -1.0f / R_p - dIa_dVa(V_a, V_gk);
@@ -58,21 +32,14 @@ struct Triode12AX7 {
             V_a -= delta;
             if (std::abs(delta) < tol) break;
         }
-
         float current = Ia(V_a, V_gk);
-
         if (C_k > 0.0f) {
             float i_c = current - V_ck / R_k;
-            float dv = i_c / C_k / sampleRate;
-            V_ck += dv;
+            V_ck += (i_c / C_k) / sampleRate;
             V_k = V_ck + current * R_k;
-        } else {
-            V_k = current * R_k;
-        }
-
+        } else V_k = current * R_k;
         return V_a;
     }
-
 private:
     float Ia(float V_ak, float V_gk) const {
         float sqrt_arg = std::sqrt(KVB + V_ak * V_ak);
@@ -82,18 +49,14 @@ private:
         float Ia = std::pow(inner, EX) / KG1;
         return std::max(0.0f, Ia);
     }
-
     float dIa_dVa(float V_ak, float V_gk) const {
         float h = 1e-3f;
-        float Ia1 = Ia(V_ak + h, V_gk);
-        float Ia0 = Ia(V_ak - h, V_gk);
-        return (Ia1 - Ia0) / (2.0f * h);
+        return (Ia(V_ak + h, V_gk) - Ia(V_ak - h, V_gk)) / (2.0f * h);
     }
 };
 
 struct FullToneStack {
     float treble = 0.8f, mid = 0.33f, bass = 0.05f;
-
     const float C1 = (750.0f + 250.0f) * 1e-12f;
     const float C2 = 0.1e-6f;
     const float C3 = 0.047e-6f;
@@ -103,74 +66,64 @@ struct FullToneStack {
 };
 
 struct PreampSimulator {
-    Triode12AX7 stage1, stage2, stage3, stage4, stage5, stage6;
+    Triode12AX7 v1a, v1b, v3b, v4a, v2b, v2a;
+    RCFilter inputR1C10, inputR10C10, c13bR5a, toneBass, toneMid, toneTreble;
+    RCFilter c21r21, gainRloadC, c25r25, masterVolRC;
     FullToneStack tone;
-    RCFilter inputGridFilter1, inputGridFilter2, gridDropFilter3;
-    RCFilter gainPotFilter;
-    float gain = 0.5f;
-    float master = 0.5f;
-    float volume1 = 0.75f;
+    float gain = 0.5f, master = 0.5f, volume1 = 0.75f;
 
-    PreampSimulator() :
-        stage1(150000.0f, 1500.0f, 22.47e-6f, 405.0f),
-        stage2(100000.0f, 1500.0f, 22e-6f,    405.0f),
-        stage3(82000.0f,  1500.0f,  2.2e-6f,  410.0f),
-        stage4(270000.0f, 3300.0f,  0.22e-6f, 410.0f),
-        stage5(47000.0f,  1000.0f, 15e-6f,    410.0f),
-        stage6(47000.0f,  2200.0f,  0.0f,     410.0f)
-    {
-        inputGridFilter1.R = 1000000.0f; inputGridFilter1.C = 20e-12f;
-        inputGridFilter2.R = 3300000.0f; inputGridFilter2.C = 20e-12f;
-        gridDropFilter3.R = 220000.0f;   gridDropFilter3.C = 250e-12f;
-        gainPotFilter.R = 100000.0f * gain + 100000.0f; gainPotFilter.C = 180e-12f;
+    PreampSimulator() {
+        v1a.R_p = 150000.0f;  v1a.R_k = 1500.0f; v1a.C_k = 22e-6f;   v1a.B_plus = 405.0f;
+        v1b.R_p = 100000.0f;  v1b.R_k = 1500.0f; v1b.C_k = 22e-6f;   v1b.B_plus = 405.0f;
+        v3b.R_p = 82000.0f;   v3b.R_k = 1500.0f; v3b.C_k = 2.2e-6f;  v3b.B_plus = 410.0f;
+        v4a.R_p = 274000.0f;  v4a.R_k = 3300.0f; v4a.C_k = 0.22e-6f; v4a.B_plus = 410.0f;
+        v2b.R_p = 100000.0f;  v2b.R_k = 1500.0f; v2b.C_k = 0.0f;     v2b.B_plus = 410.0f;
+        v2a.R_p = 120000.0f;  v2a.R_k = 1000.0f; v2a.C_k = 15.47f;   v2a.B_plus = 410.0f;
+
+        inputR1C10.R = 1000000.0f; inputR1C10.C = 20e-12f;
+        inputR10C10.R = 3300000.0f; inputR10C10.C = 20e-12f;
+        c13bR5a.R = 100000.0f; c13bR5a.C = 180e-12f;
+
+        toneBass.R = 250000.0f * (1 - tone.bass); toneBass.C = tone.C2;
+        toneMid.R = 10000.0f * (1 - tone.mid); toneMid.C = tone.C3;
+        toneTreble.R = (250000.0f * (1 - tone.treble)) + 100000.0f; toneTreble.C = tone.C1;
+
+        c21r21.R = 680000.0f; c21r21.C = 0.02e-6f;
+        gainRloadC.R = 475000.0f; gainRloadC.C = 120e-12f;
+        c25r25.R = 270000.0f; c25r25.C = 0.022e-6f;
+        masterVolRC.R = 1000000.0f * master; masterVolRC.C = 47e-12f;
     }
 
     float process(float input) {
-        float x = input;
-        x = inputGridFilter1.process(x);
-        x = inputGridFilter2.process(x);
-        x = stage1.process(x);
+        //float x = inputR1C10.process(input);
+        float x = v1a.process(input);
 
-        float tone_in = x;
-        static float v_bass = 0.0f;
-        static float v_mid = 0.0f;
-        static float v_treble = 0.0f;
+        float toneIn = x;
+        static float vb = 0.0f, vm = 0.0f, vt = 0.0f;
+        float aB = 1.0f / (1.0f + toneBass.R * toneBass.C * sampleRate);
+        float aM = 1.0f / (1.0f + toneMid.R * toneMid.C * sampleRate);
+        float aT = 1.0f / (1.0f + toneTreble.R * toneTreble.C * sampleRate);
+        vb = aB * toneIn + (1 - aB) * vb;
+        vm = aM * toneIn + (1 - aM) * vm;
+        vt = aT * toneIn + (1 - aT) * vt;
+        float toneOut = (vb + vm + vt) / 3.0f * volume1;
 
-        float Rb = tone.R2 * (1.0f - tone.bass);
-        float Rm = tone.R3 * (1.0f - tone.mid);
-        float Rt = tone.R1 * (1.0f - tone.treble);
+        float x2 = v1b.process(c13bR5a.process(toneOut));
+        float gainIn = c7r9.process(x2);
 
-        float alpha_bass = 1.0f / (1.0f + Rb * tone.C2 * 48000.0f);
-        float alpha_mid  = 1.0f / (1.0f + Rm * tone.C3 * 48000.0f);
-        float alpha_treb = 1.0f / (1.0f + Rt * tone.C1 * 48000.0f);
+        // TODO
+        //x = inputR10C10.process(gainIn);
 
-        v_bass = alpha_bass * tone_in + (1.0f - alpha_bass) * v_bass;
-        v_mid  = alpha_mid  * tone_in + (1.0f - alpha_mid)  * v_mid;
-        v_treble = alpha_treb * tone_in + (1.0f - alpha_treb) * v_treble;
-
-        float tone_out = (v_bass + v_mid + v_treble) / 3.0f;
-
-        float v_after_vol = tone_out * volume1;
-        float v_lp = gainPotFilter.process(v_after_vol);
-
-        x = stage2.process(v_lp);
-        x = stage3.process(x);
-        x = stage4.process(gridDropFilter3.process(x));
-        x = stage5.process(x);
-        x = stage6.process(x);
-        return x * master;
+        // float top = 1000000.0f * (1 - gain), bot = 1000000.0f * gain;
+        // float gainOut = bot / (top + bot + 1e-9f) * gainIn;
+        // x = v3b.process(gainRloadC.process(gainOut));
+        // x = v4a.process(c25r25.process(x));
+        //x = v2b.process(masterVolRC.process(x));
+        return gainIn;
     }
 };
 
 int main() {
-    // FullToneStack tone;
-    // tone.treble = 0.8f;
-    // tone.mid = 0.33f;
-    // tone.bass = 0.05f;
-    // tone.plotFrequencyResponse();
-
-    float sampleRate = 48000.0f;    // Audio sample rate in Hz
-
     PreampSimulator amplifier;
     amplifier.tone.treble = 0.8f;
     amplifier.tone.mid = 0.33f;
@@ -184,7 +137,7 @@ int main() {
     // float L = duration / std::log(k);
 
     double phase = 0.0;
-    for (long i = 0; i < 48000 * 5; ++i) {
+    for (long i = 0; i < static_cast<long>(sampleRate * duration); ++i) {
         float t = static_cast<float>(i) / sampleRate;
         float instantaneousFreq = startFreq * std::pow(k, t / duration);
 
