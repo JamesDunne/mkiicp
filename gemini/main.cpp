@@ -3,6 +3,20 @@
 
 #include "sim.hpp"
 
+/**
+ * @brief Parses a RIFF WAVE file, processes its samples, and writes a new WAVE file.
+ *
+ * @param inputFilename The path to the input .wav file.
+ * @param outputFilename The path to write the output .wav file.
+ * @param processor A function that takes a sample as a double [-1.0, 1.0] and returns a processed sample.
+ * @throws std::runtime_error on file I/O errors or if the WAVE format is unsupported.
+ */
+void processWavFile(
+    const std::string& inputFilename,
+    const std::string& outputFilename,
+    const std::function<double(double)>& processor
+);
+
 void setup_markiicp(RealtimeTubeSim& sim) {
     std::vector<std::string> nodes = {
         "N001", "N002", "N003", "N004", "N005", "N006", "N007", "N008", "N009", "N010",
@@ -187,6 +201,11 @@ void simulate_sine_sweep(RealtimeTubeSim& sim, const double sampleRate) {
 }
 
 int main(int argc, char *argv[]) {
+    if (argc != 3) {
+        std::cerr << "Usage: " << argv[0] << " <input.wav> <output.wav>" << std::endl;
+        return 1;
+    }
+
     const double sampleRate = 48000.0;
     RealtimeTubeSim sim { sampleRate };
 
@@ -206,7 +225,38 @@ int main(int argc, char *argv[]) {
     sim.set_parameter("lead_master", 0.75);
     sim.set_parameter("master", 0.5);
 
-    simulate_sine_sweep(sim, sampleRate);
+    //simulate_sine_sweep(sim, sampleRate);
+
+    try {
+        const std::string input_filename = argv[1];
+        const std::string output_filename = argv[2];
+
+        // Define your audio processing logic here. A lambda is a great choice.
+        // Example 1: Reduce volume by 50%
+        auto volume_reducer = [](double sample) {
+            return sample * 0.5;
+        };
+
+        // Example 2: Simple distortion (hard clipping)
+        auto simple_distortion = [](double sample) {
+            double boosted_sample = sample * 2.0; // Increase gain
+            return std::max(-1.0, std::min(1.0, boosted_sample)); // Clip to [-1, 1]
+        };
+
+        auto ampsim_process = [&](double sample) -> double {
+            return sim.process_sample(sample);
+        };
+
+        // Call the reusable processing function with the desired effect.
+        // Change 'volume_reducer' to 'simple_distortion' to apply a different effect.
+        processWavFile(input_filename, output_filename, ampsim_process);
+
+        std::cout << "Successfully processed " << input_filename << " to " << output_filename << std::endl;
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
 
     return 0;
 }
