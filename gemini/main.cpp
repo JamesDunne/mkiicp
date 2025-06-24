@@ -3,43 +3,7 @@
 
 #include "sim.hpp"
 
-int main(int argc, char *argv[]) {
-    const double sampleRate = 48000.0;
-    RealtimeTubeSim sim { sampleRate };
-
-#if 0
-    // single tube stage preamp with tone stack:
-
-    // Define all nodes first
-    sim.add_node("in"); sim.add_node("g"); sim.add_node("p"); sim.add_node("k");
-    sim.add_node("V_P"); sim.add_node("ts1"); sim.add_node("ts2"); sim.add_node("ts3");
-    sim.add_node("out"); sim.add_node("out_final");
-
-    // --- Static Components ---
-    sim.add_resistor("g", "gnd", 1e6);        // Grid leak
-    sim.add_resistor("V_P", "p", 100e3);      // Plate load
-    sim.add_resistor("k", "gnd", 1.5e3);       // Cathode resistor
-    sim.add_resistor("out_final", "gnd", 1e6);// Final load
-    sim.add_capacitor("in", "g", 22e-9);      // Input cap
-    sim.add_capacitor("k", "gnd", 22e-6);     // Cathode bypass
-    sim.add_capacitor("p", "ts1", 22e-9);     // Coupling cap to tone stack
-    sim.add_capacitor("ts1", "ts3", 250e-12);  // Treble cap
-    sim.add_capacitor("ts2", "ts3", 22e-9);    // Mid cap
-    sim.add_capacitor("out", "out_final", 100e-9); // Output cap
-
-    // --- Dynamic Components (Pots/Variable Resistors) ---
-    sim.add_variable_resistor("treble", "ts1", "ts2", 250e3, 'L');
-    sim.add_variable_resistor("bass", "ts2", "gnd", 1e6, 'A'); // Bass pot wired as rheostat
-    sim.add_variable_resistor("mid", "ts3", "gnd", 25e3, 'L');
-    sim.add_potentiometer("master", "ts3", "gnd", "out", 1e6, 'A');
-
-    // --- Active Components ---
-    sim.add_triode("p", "g", "k", 96.2, 1.437, 613.4, 740.3, 1672.0, 2000.0);
-
-    // --- Sources ---
-    sim.add_voltage_source("V_P", "gnd", 300.0, false);
-    sim.add_voltage_source("in", "gnd", 0.0, true);
-#else
+void setup_markiicp(RealtimeTubeSim& sim) {
     std::vector<std::string> nodes = {
         "N001", "N002", "N003", "N004", "N005", "N006", "N007", "N008", "N009", "N010",
         "N011", "N012", "N013", "N014", "N015", "N016", "N017", "N018", "N019", "N020",
@@ -157,18 +121,43 @@ int main(int argc, char *argv[]) {
 
     // XV2A: 12AX7 N012 N023 N031
     sim.add_triode("N012", "N023", "N031");
-#endif
+}
 
-    sim.prepare_to_play();
+void setup_basic_tube_preamp(RealtimeTubeSim& sim) {
+    // single tube stage preamp with tone stack:
 
-    // Set controls
-    sim.set_parameter("volume1", 0.75);
-    sim.set_parameter("treble", 0.8);
-    sim.set_parameter("mid", 0.33);
-    sim.set_parameter("bass", 0.05);
-    sim.set_parameter("lead_master", 0.75);
-    sim.set_parameter("master", 0.5);
+    // Define all nodes first
+    sim.add_node("in"); sim.add_node("g"); sim.add_node("p"); sim.add_node("k");
+    sim.add_node("V_P"); sim.add_node("ts1"); sim.add_node("ts2"); sim.add_node("ts3");
+    sim.add_node("out"); sim.add_node("out_final");
 
+    // --- Static Components ---
+    sim.add_resistor("g", "gnd", 1e6);        // Grid leak
+    sim.add_resistor("V_P", "p", 100e3);      // Plate load
+    sim.add_resistor("k", "gnd", 1.5e3);       // Cathode resistor
+    sim.add_resistor("out_final", "gnd", 1e6);// Final load
+    sim.add_capacitor("in", "g", 22e-9);      // Input cap
+    sim.add_capacitor("k", "gnd", 22e-6);     // Cathode bypass
+    sim.add_capacitor("p", "ts1", 22e-9);     // Coupling cap to tone stack
+    sim.add_capacitor("ts1", "ts3", 250e-12);  // Treble cap
+    sim.add_capacitor("ts2", "ts3", 22e-9);    // Mid cap
+    sim.add_capacitor("out", "out_final", 100e-9); // Output cap
+
+    // --- Dynamic Components (Pots/Variable Resistors) ---
+    sim.add_variable_resistor("treble", "ts1", "ts2", 250e3, 'L');
+    sim.add_variable_resistor("bass", "ts2", "gnd", 1e6, 'A'); // Bass pot wired as rheostat
+    sim.add_variable_resistor("mid", "ts3", "gnd", 25e3, 'L');
+    sim.add_potentiometer("master", "ts3", "gnd", "out", 1e6, 'A');
+
+    // --- Active Components ---
+    sim.add_triode("p", "g", "k", 96.2, 1.437, 613.4, 740.3, 1672.0, 2000.0);
+
+    // --- Sources ---
+    sim.add_voltage_source("V_P", "gnd", 300.0, false);
+    sim.add_voltage_source("in", "gnd", 0.0, true);
+}
+
+void simulate_sine_sweep(RealtimeTubeSim& sim, const double sampleRate) {
     double startFreq = 20.0f;        // Start frequency in Hz
     double endFreq = 20000.0f;       // End frequency in Hz
     double duration = 5.0f;          // Sweep duration in seconds
@@ -191,10 +180,33 @@ int main(int argc, char *argv[]) {
         x = sim.process_sample(x);
 
         std::cout
-            << t << ","
-            << x
-            << std::endl;
+                << t << ","
+                << x
+                << std::endl;
     }
+}
+
+int main(int argc, char *argv[]) {
+    const double sampleRate = 48000.0;
+    RealtimeTubeSim sim { sampleRate };
+
+#if 0
+    setup_basic_tube_preamp(sim);
+#else
+    setup_markiicp(sim);
+#endif
+
+    sim.prepare_to_play();
+
+    // Set controls for IIC+:
+    sim.set_parameter("volume1", 0.75);
+    sim.set_parameter("treble", 0.8);
+    sim.set_parameter("mid", 0.33);
+    sim.set_parameter("bass", 0.05);
+    sim.set_parameter("lead_master", 0.75);
+    sim.set_parameter("master", 0.5);
+
+    simulate_sine_sweep(sim, sampleRate);
 
     return 0;
 }
