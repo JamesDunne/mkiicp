@@ -11,39 +11,57 @@
 
 /**
  * @class RealtimeTubeSim
- * @brief A flexible, component-based C++ realtime audio circuit simulator.
+ * @brief A flexible, component-based C++ realtime audio circuit simulator with dynamic parameters.
  *
- * This version has been refactored to support arbitrary circuit topologies with multiple
- * non-linear triode stages.
+ * This version adds support for interactive, realtime control of potentiometers and variable resistors.
  *
  * Key Features:
- * - **Component API:** Add resistors, capacitors, voltage sources, and triodes to nodes programmatically.
- * - **Multi-Triode Support:** Simulate complex multi-stage amplifiers.
- * - **Advanced 12AX7 Model:** Implements a detailed SPICE model for high-fidelity simulation.
- * - **Numerical Jacobian:** Automatically and accurately calculates partial derivatives for the
- *   non-linear models using finite differences, ensuring stability and extensibility.
+ * - **Dynamic Parameters:** Add potentiometers and variable resistors by name, and control them
+ *   in realtime with the `set_parameter()` method.
+ * - **Optimized Performance:** A "dirty flag" system ensures that matrix recalculations only
+ *   occur when a parameter changes, not on every sample.
+ * - **Taper Support:** Models both Linear ('L') and Audio/Logarithmic ('A') tapers.
+ * - **Component API:** Build arbitrary circuits by adding nodes, R, C, V, and Triode components.
+ * - **Advanced 12AX7 Model:** Uses a detailed SPICE model with a numerically-computed Jacobian.
  *
- * Example Usage (to build the original preamp circuit):
+ * Example Usage (to build the original preamp with tone stack):
  *
  *   RealtimeTubeSim sim(48000.0);
- *   // Define nodes
+ *   // Define all nodes first
  *   sim.add_node("in"); sim.add_node("g"); sim.add_node("p"); sim.add_node("k");
  *   sim.add_node("V_P"); sim.add_node("ts1"); sim.add_node("ts2"); sim.add_node("ts3");
  *   sim.add_node("out"); sim.add_node("out_final");
  *
- *   // Add components
- *   sim.add_resistor("in", "gnd", 1e6);
- *   sim.add_resistor("g", "gnd", 1e6);
- *   // ... and so on for all R and C components ...
+ *   // --- Static Components ---
+ *   sim.add_resistor("g", "gnd", 1e6);        // Grid leak
+ *   sim.add_resistor("V_P", "p", 100e3);      // Plate load
+ *   sim.add_resistor("k", "gnd", 1.5e3);       // Cathode resistor
+ *   sim.add_resistor("out_final", "gnd", 1e6);// Final load
+ *   sim.add_capacitor("in", "g", 22e-9);      // Input cap
+ *   sim.add_capacitor("k", "gnd", 22e-6);     // Cathode bypass
+ *   sim.add_capacitor("p", "ts1", 22e-9);     // Coupling cap to tone stack
+ *   sim.add_capacitor("ts1", "ts3", 250e-12);  // Treble cap
+ *   sim.add_capacitor("ts2", "ts3", 22e-9);    // Mid cap
+ *   sim.add_capacitor("out", "out_final", 100e-9); // Output cap
  *
- *   // Add the triode with specified model parameters
- *   sim.add_triode("p", "g", "k", 96.20, 1.437, 613.4, 740.3, 1672.0, 2000.0);
+ *   // --- Dynamic Components (Pots/Variable Resistors) ---
+ *   sim.add_variable_resistor("treble", "ts1", "ts2", 250e3, 'L');
+ *   sim.add_variable_resistor("bass", "ts2", "gnd", 1e6, 'A'); // Bass pot wired as rheostat
+ *   sim.add_variable_resistor("mid", "ts3", "gnd", 25e3, 'L');
+ *   sim.add_potentiometer("master", "ts3", "gnd", "out", 1e6, 'A');
  *
- *   // Add sources
+ *   // --- Active Components ---
+ *   sim.add_triode("p", "g", "k", 96.2, 1.437, 613.4, 740.3, 1672.0, 2000.0);
+ *
+ *   // --- Sources ---
  *   sim.add_voltage_source("V_P", "gnd", 300.0, false);
- *   sim.add_voltage_source("in", "gnd", 0.0, true); // Input signal
+ *   sim.add_voltage_source("in", "gnd", 0.0, true);
  *
- *   sim.prepare_to_play(); // Finalizes matrices and solves DC point
+ *   sim.prepare_to_play();
+ *
+ *   // In main loop:
+ *   // sim.set_parameter("bass", 0.75);
+ *   // output = sim.process_sample(input);
  */
 class RealtimeTubeSim {
 public:
@@ -57,36 +75,40 @@ public:
     }
 
     // --- 1. Circuit Building API ---
-
     int add_node(const std::string& name) {
-        if (m_node_map.find(name) == m_node_map.end()) {
-            m_node_map[name] = m_num_nodes++;
-        }
+        if (m_node_map.find(name) == m_node_map.end()) m_node_map[name] = m_num_nodes++;
         return m_node_map[name];
     }
-
-    void add_resistor(const std::string& n1_str, const std::string& n2_str, double R) {
-        m_resistors.push_back({m_node(n1_str), m_node(n2_str), R});
+    void add_resistor(const std::string& n1, const std::string& n2, double R) { m_resistors.push_back({m_node(n1), m_node(n2), R}); }
+    void add_capacitor(const std::string& n1, const std::string& n2, double C) { m_capacitors.push_back({m_node(n1), m_node(n2), C}); }
+    void add_voltage_source(const std::string& n_pos, const std::string& n_neg, double V, bool is_ac) {
+        if (n_neg != "gnd" && n_neg != "0") throw std::runtime_error("V-sources must be grounded.");
+        m_v_sources.push_back({m_node(n_pos), V, is_ac});
     }
-
-    void add_capacitor(const std::string& n1_str, const std::string& n2_str, double C) {
-        m_capacitors.push_back({m_node(n1_str), m_node(n2_str), C});
+    void add_triode(const std::string& p, const std::string& g, const std::string& k, double mu, double ex, double kg1, double kp, double kvb, double rgi) {
+        m_triodes.push_back({m_node(p), m_node(g), m_node(k), mu, ex, kg1, kp, kvb, rgi});
     }
-
-    void add_voltage_source(const std::string& n_pos_str, const std::string& n_neg_str, double V, bool is_time_varying) {
-        if (n_neg_str != "gnd" && n_neg_str != "0") throw std::runtime_error("V-sources must be grounded.");
-        m_v_sources.push_back({m_node(n_pos_str), V, is_time_varying});
+    void add_potentiometer(const std::string& name, const std::string& n1, const std::string& n2, const std::string& wiper, double R, char taper) {
+        m_potentiometers[name] = {m_node(n1), m_node(n2), m_node(wiper), R, 0.5, taper};
     }
-
-    void add_triode(const std::string& p_str, const std::string& g_str, const std::string& k_str,
-                    double mu, double ex, double kg1, double kp, double kvb, double rgi) {
-        Triode t;
-        t.p_node = m_node(p_str); t.g_node = m_node(g_str); t.k_node = m_node(k_str);
-        t.mu = mu; t.ex = ex; t.kg1 = kg1; t.kp = kp; t.kvb = kvb; t.rgi = rgi;
-        m_triodes.push_back(t);
+    void add_variable_resistor(const std::string& name, const std::string& n1, const std::string& n2, double R_max, char taper) {
+        m_variable_resistors[name] = {m_node(n1), m_node(n2), R_max, 0.5, taper};
     }
 
     // --- 2. Simulation Control ---
+    void set_parameter(const std::string& name, double value) {
+        value = std::max(0.0, std::min(1.0, value));
+        if (m_potentiometers.count(name)) {
+            m_potentiometers.at(name).value = value;
+            m_params_dirty = true;
+        } else if (m_variable_resistors.count(name)) {
+            m_variable_resistors.at(name).value = value;
+            m_params_dirty = true;
+        } else {
+            // It's often better to fail silently in realtime audio
+            // throw std::runtime_error("Parameter not found: " + name);
+        }
+    }
 
     void prepare_to_play() {
         if (m_is_prepared) return;
@@ -97,104 +119,103 @@ public:
 
         for(const auto& r : m_resistors) stamp_resistor(m_G_static, r.n1, r.n2, r.R);
         for(const auto& c : m_capacitors) stamp_capacitor(c.n1, c.n2, c.C);
-        for(const auto& vs : m_v_sources) {
-            m_G_static[vs.node][vs.node] += G_LARGE;
-        }
-        // Stamp static part of triode models (e.g. RCP)
-        for (const auto& t : m_triodes) {
-            stamp_resistor(m_G_static, t.p_node, t.k_node, 1e9); // RCP = 1G
-        }
+        for(const auto& vs : m_v_sources) m_G_static[vs.node][vs.node] += G_LARGE;
+        for (const auto& t : m_triodes) stamp_resistor(m_G_static, t.p_node, t.k_node, 1e9);
 
-        m_G_dynamic = m_G_static;
+        m_params_dirty = true; // Force initial calculation
+        update_dynamic_components(); // Initial stamp of pots
+
         solve_dc();
         m_is_prepared = true;
     }
 
     double process_sample(double input_sample) {
         if (!m_is_prepared) prepare_to_play();
+        if (m_params_dirty) update_dynamic_components();
 
         Vector b(m_num_nodes, 0.0);
         for (const auto& vs : m_v_sources) {
             double voltage = vs.is_time_varying ? input_sample : vs.dc_voltage;
             b[vs.node] += voltage * G_LARGE;
         }
-
         m_x = m_x_prev;
 
         for (int i=0; i<m_nr_max_iter; ++i) {
             Matrix J = m_G_dynamic;
-            for(int r=0; r<m_num_nodes; ++r) for(int c=0; c<m_num_nodes; ++c) {
-                J[r][c] += m_C_mat[r][c] / m_dt;
-            }
-
+            for(int r=0; r<m_num_nodes; ++r) for(int c=0; c<m_num_nodes; ++c) J[r][c] += m_C_mat[r][c] / m_dt;
             Vector Gx = matrix_vector_mult(m_G_dynamic, m_x);
-            Vector x_diff = m_x;
-            for(size_t k=0; k<m_x.size(); ++k) x_diff[k] -= m_x_prev[k];
-            Vector C_x_diff_dt = matrix_vector_mult(m_C_mat, x_diff);
-            for(size_t k=0; k<m_x.size(); ++k) C_x_diff_dt[k] /= m_dt;
-
-            Vector f(m_num_nodes);
-            for(size_t k=0; k<f.size(); ++k) f[k] = Gx[k] + C_x_diff_dt[k] - b[k];
+            Vector x_diff = m_x; for(size_t k=0; k<m_x.size(); ++k) x_diff[k] -= m_x_prev[k];
+            Vector C_x_diff_dt = matrix_vector_mult(m_C_mat, x_diff); for(size_t k=0; k<m_x.size(); ++k) C_x_diff_dt[k] /= m_dt;
+            Vector f(m_num_nodes); for(size_t k=0; k<f.size(); ++k) f[k] = Gx[k] + C_x_diff_dt[k] - b[k];
 
             add_all_nonlinear_stamps(J, f, m_x);
 
             for(size_t j=0; j<f.size(); ++j) f[j] = -f[j];
-            auto p = lu_decompose(J);
-            Vector dx = lu_solve(J, p, f);
-
-            double damping_factor = 1.0;
-            double max_step = 0.0;
-            for(double val : dx) max_step = std::max(max_step, std::abs(val));
-            if (max_step > m_nr_damping) damping_factor = m_nr_damping / max_step;
-
-            double norm = 0.0;
-            for (int j=0; j<m_num_nodes; ++j) {
-                double step = damping_factor * dx[j];
-                m_x[j] += step; norm += step * step;
-            }
+            auto p = lu_decompose(J); Vector dx = lu_solve(J, p, f);
+            double damp = 1.0, max_s = 0.0; for(double v : dx) max_s = std::max(max_s, std::abs(v));
+            if (max_s > m_nr_damping) damp = m_nr_damping / max_s;
+            double norm = 0.0; for (int j=0; j<m_num_nodes; ++j) { double s = damp*dx[j]; m_x[j]+=s; norm+=s*s; }
             if (sqrt(norm) < m_nr_tolerance) break;
         }
-
         m_x_prev = m_x;
-        // In a real plugin, you would add an output node name parameter.
-        // For now, we assume the last added node is the output.
         return m_x.back();
     }
 
 private:
-    // --- Data Structures ---
     struct Resistor { int n1, n2; double R; };
     struct Capacitor { int n1, n2; double C; };
     struct VoltageSource { int node; double dc_voltage; bool is_time_varying; };
-    struct Triode {
-        int p_node, g_node, k_node;
-        double mu, ex, kg1, kp, kvb, rgi;
-    };
+    struct Triode { int p_node, g_node, k_node; double mu, ex, kg1, kp, kvb, rgi; };
+    struct Potentiometer { int n1, n2, wiper; double R_total; double value; char taper; };
+    struct VariableResistor { int n1, n2; double R_max; double value; char taper; };
 
     std::vector<Resistor> m_resistors;
     std::vector<Capacitor> m_capacitors;
     std::vector<VoltageSource> m_v_sources;
     std::vector<Triode> m_triodes;
+    std::map<std::string, Potentiometer> m_potentiometers;
+    std::map<std::string, VariableResistor> m_variable_resistors;
 
     Matrix m_G_static, m_G_dynamic, m_C_mat;
     Vector m_x, m_x_prev;
     int m_num_nodes = 0;
     std::map<std::string, int> m_node_map;
     bool m_is_prepared = false;
+    bool m_params_dirty = true;
 
-    // --- Simulation Parameters ---
     double m_sample_rate, m_dt;
-    const int m_nr_max_iter = 15;
-    const double m_nr_tolerance = 1e-6;
-    const double m_nr_damping = 1.0;
-    const double G_LARGE = 1e12;
+    const int m_nr_max_iter = 15, m_nr_damping = 1.0;
+    const double m_nr_tolerance = 1e-6, G_LARGE = 1e12;
 
-    // --- Internal Methods ---
+    void update_dynamic_components() {
+        m_G_dynamic = m_G_static;
+        for (const auto& pair : m_potentiometers) {
+            const auto& p = pair.second;
+            double w = p.value;
+            if (p.taper == 'A' || p.taper == 'a') w = w * w; // Audio taper approximation
+            double r1 = p.R_total * w;
+            double r2 = p.R_total * (1.0 - w);
+            stamp_resistor(m_G_dynamic, p.n1, p.wiper, r1);
+            stamp_resistor(m_G_dynamic, p.wiper, p.n2, r2);
+        }
+        for (const auto& pair : m_variable_resistors) {
+            const auto& vr = pair.second;
+            double w = vr.value;
+            if (vr.taper == 'A' || vr.taper == 'a') w = w * w;
+            stamp_resistor(m_G_dynamic, vr.n1, vr.n2, vr.R_max * w);
+        }
+        m_params_dirty = false;
+    }
+
+    void add_all_nonlinear_stamps(Matrix& J, Vector& f, const Vector& x) {
+        for (const auto& tube : m_triodes) {
+            add_single_triode_stamps_numerical(tube, J, f, x);
+        }
+    }
+
     int m_node(const std::string& name) {
         if (name == "gnd" || name == "0") return -1;
-        if (m_node_map.find(name) == m_node_map.end()) {
-            return add_node(name);
-        }
+        if (m_node_map.find(name) == m_node_map.end()) return add_node(name);
         return m_node_map.at(name);
     }
 
@@ -203,121 +224,70 @@ private:
         for (const auto& vs : m_v_sources) b_dc[vs.node] += vs.dc_voltage * G_LARGE;
         m_x.assign(m_num_nodes, 0.0);
         for (int i=0; i<30; ++i) {
-            Matrix J = m_G_dynamic;
-            Vector f = matrix_vector_mult(m_G_dynamic, m_x);
-            for(size_t j = 0; j < f.size(); ++j) f[j] -= b_dc[j];
+            Matrix J = m_G_dynamic; Vector f = matrix_vector_mult(m_G_dynamic, m_x);
+            for(size_t j=0; j<f.size(); ++j) f[j] -= b_dc[j];
             add_all_nonlinear_stamps(J, f, m_x);
-            for(size_t j = 0; j < f.size(); ++j) f[j] = -f[j];
+            for(size_t j=0; j<f.size(); ++j) f[j] = -f[j];
             auto p = lu_decompose(J); Vector dx = lu_solve(J, p, f);
-            double norm = 0.0;
-            for (int j=0; j<m_num_nodes; ++j) { m_x[j] += dx[j]; norm += dx[j] * dx[j]; }
+            double norm=0.0; for (int j=0; j<m_num_nodes; ++j){ m_x[j]+=dx[j]; norm+=dx[j]*dx[j]; }
             if (sqrt(norm) < m_nr_tolerance) break;
         }
         m_x_prev = m_x;
     }
 
-    // --- Non-linear Model Implementation ---
-
-    void add_all_nonlinear_stamps(Matrix& J, Vector& f, const Vector& x) {
-        for (const auto& tube : m_triodes) {
-            add_single_triode_stamps_numerical(tube, J, f, x);
-        }
-    }
-
-    // New 12AX7 model based on SPICE subcircuit
-    void get_triode_currents(const Triode& t, double Vp, double Vg, double Vk, double& Ip, double& Ig) {
-        const double Vpk = Vp - Vk;
-        const double Vgk = Vg - Vk;
-
-        // Plate Current (Duncan Munro model)
+    static void get_triode_currents(const Triode& t, double Vp, double Vg, double Vk, double& Ip, double& Ig) {
+        const double Vpk = Vp - Vk, Vgk = Vg - Vk;
         const double kvb_vpk_sq = t.kvb + Vpk * Vpk;
-        if (kvb_vpk_sq <= 0) {
-            Ip = 0;
-        } else {
+        Ip = 0;
+        if (kvb_vpk_sq > 0) {
             const double inner_exp = t.kp * (1.0 / t.mu + Vgk / sqrt(kvb_vpk_sq));
-            double E1 = 0.0;
-            // Use log(1+exp(x)) "softplus" function for stability
-            if (inner_exp < -100) E1 = 0.0; // exp(x) -> 0
-            else if (inner_exp > 100) E1 = (Vpk / t.kp) * inner_exp; // exp(x) -> inf, log(exp(x)) -> x
-            else E1 = (Vpk / t.kp) * log(1.0 + exp(inner_exp));
-
-            // The 0.5*(pwr+pwrs) term is a smooth way of saying: if (E1 > 0) current = E1^ex else 0
-            if (E1 > 0) {
-                Ip = pow(E1, t.ex) / t.kg1;
-            } else {
-                Ip = 0;
+            if (inner_exp < 100) { // log(1+exp(x)) is ~x for large x
+                double E1 = (Vpk / t.kp) * log(1.0 + exp(inner_exp));
+                if (E1 > 0) Ip = pow(E1, t.ex) / t.kg1;
             }
         }
-
-        // Grid Current (approximated diode with series resistor RGI)
-        if (Vgk > 0) {
-            Ig = (Vgk * Vgk) / (t.rgi + Vgk); // Simple non-linear diode-like current
-        } else {
-            Ig = 0;
-        }
+        Ig = (Vgk > 0) ? (Vgk * Vgk) / (t.rgi + Vgk) : 0;
     }
 
     void add_single_triode_stamps_numerical(const Triode& t, Matrix& J, Vector& f, const Vector& x) {
-        double Vp = x[t.p_node], Vg = x[t.g_node], Vk = x[t.k_node];
-
-        // 1. Calculate base currents at x
-        double Ip0, Ig0;
-        get_triode_currents(t, Vp, Vg, Vk, Ip0, Ig0);
-
-        // 2. Add base currents to residual vector f
-        f[t.p_node] += Ip0;
-        f[t.k_node] -= Ip0;
-        f[t.g_node] += Ig0;
-        f[t.k_node] -= Ig0;
-
-        // 3. Calculate partial derivatives using finite differences and add to Jacobian J
-        const double delta = 1e-6; // Small voltage perturbation
-
-        // d/dVp
-        double Ip_p, Ig_p;
-        get_triode_currents(t, Vp + delta, Vg, Vk, Ip_p, Ig_p);
-        double dIp_dVp = (Ip_p - Ip0) / delta;
-        double dIg_dVp = (Ig_p - Ig0) / delta;
-
-        // d/dVg
-        double Ip_g, Ig_g;
-        get_triode_currents(t, Vp, Vg + delta, Vk, Ip_g, Ig_g);
-        double dIp_dVg = (Ip_g - Ip0) / delta;
-        double dIg_dVg = (Ig_g - Ig0) / delta;
-
-        // d/dVk
-        double Ip_k, Ig_k;
-        get_triode_currents(t, Vp, Vg, Vk + delta, Ip_k, Ig_k);
-        double dIp_dVk = (Ip_k - Ip0) / delta;
-        double dIg_dVk = (Ig_k - Ig0) / delta;
-
-        // Stamp Jacobian
-        J[t.p_node][t.p_node] += dIp_dVp; J[t.p_node][t.g_node] += dIp_dVg; J[t.p_node][t.k_node] += dIp_dVk;
-        J[t.g_node][t.p_node] += dIg_dVp; J[t.g_node][t.g_node] += dIg_dVg; J[t.g_node][t.k_node] += dIg_dVk;
-        J[t.k_node][t.p_node] -= (dIp_dVp + dIg_dVp);
-        J[t.k_node][t.g_node] -= (dIp_dVg + dIg_dVg);
-        J[t.k_node][t.k_node] -= (dIp_dVk + dIg_dVk);
+        double Vp=x[t.p_node], Vg=x[t.g_node], Vk=x[t.k_node];
+        double Ip0, Ig0; get_triode_currents(t, Vp, Vg, Vk, Ip0, Ig0);
+        f[t.p_node] += Ip0; f[t.k_node] -= Ip0; f[t.g_node] += Ig0; f[t.k_node] -= Ig0;
+        const double delta = 1e-6;
+        double Ip_p, Ig_p; get_triode_currents(t, Vp+delta, Vg, Vk, Ip_p, Ig_p);
+        double dIp_dVp=(Ip_p-Ip0)/delta, dIg_dVp=(Ig_p-Ig0)/delta;
+        double Ip_g, Ig_g; get_triode_currents(t, Vp, Vg+delta, Vk, Ip_g, Ig_g);
+        double dIp_dVg=(Ip_g-Ip0)/delta, dIg_dVg=(Ig_g-Ig0)/delta;
+        double Ip_k, Ig_k; get_triode_currents(t, Vp, Vg, Vk+delta, Ip_k, Ig_k);
+        double dIp_dVk=(Ip_k-Ip0)/delta, dIg_dVk=(Ig_k-Ig0)/delta;
+        J[t.p_node][t.p_node]+=dIp_dVp; J[t.p_node][t.g_node]+=dIp_dVg; J[t.p_node][t.k_node]+=dIp_dVk;
+        J[t.g_node][t.p_node]+=dIg_dVp; J[t.g_node][t.g_node]+=dIg_dVg; J[t.g_node][t.k_node]+=dIg_dVk;
+        J[t.k_node][t.p_node]-=(dIp_dVp+dIg_dVp); J[t.k_node][t.g_node]-=(dIp_dVg+dIg_dVg); J[t.k_node][t.k_node]-=(dIp_dVk+dIg_dVk);
     }
 
-    // --- MNA Stamping Helpers ---
     void stamp_resistor(Matrix& G, int n1, int n2, double R) {
         if (R <= 1e-9) R = 1e-9; double g = 1.0 / R;
-        if (n1 != -1) G[n1][n1] += g; if (n2 != -1) G[n2][n2] += g;
-        if (n1 != -1 && n2 != -1) { G[n1][n2] -= g; G[n2][n1] -= g; }
-    }
-    void stamp_capacitor(int n1, int n2, double C) {
-        if (n1 != -1) m_C_mat[n1][n1] += C; if (n2 != -1) m_C_mat[n2][n2] += C;
-        if (n1 != -1 && n2 != -1) { m_C_mat[n1][n2] -= C; m_C_mat[n2][n1] -= C; }
+        if (n1!=-1) G[n1][n1]+=g; if (n2!=-1) G[n2][n2]+=g;
+        if (n1!=-1 && n2!=-1) { G[n1][n2]-=g; G[n2][n1]-=g; }
     }
 
-    // --- Linear Algebra ---
-    static RealtimeTubeSim::Vector matrix_vector_mult(const Matrix& A, const Vector& v) {
+    void stamp_capacitor(int n1, int n2, double C) {
+        if (n1!=-1) m_C_mat[n1][n1]+=C; if (n2!=-1) m_C_mat[n2][n2]+=C;
+        if (n1!=-1 && n2!=-1) { m_C_mat[n1][n2]-=C; m_C_mat[n2][n1]-=C; }
+    }
+
+    // Vector matrix_vector_mult(const Matrix& A, const Vector& v) { /* ... same ... */ }
+    // Vector lu_decompose(Matrix& A) { /* ... same ... */ }
+    // Vector lu_solve(const Matrix& LU, const Vector& p_in, const Vector& b) { /* ... same ... */ }
+
+    // Re-paste the implementations to avoid snipping
+    Vector matrix_vector_mult(const Matrix& A, const Vector& v) {
         Vector result(v.size(), 0.0);
         for (size_t i = 0; i < A.size(); ++i) for (size_t j = 0; j < v.size(); ++j) result[i] += A[i][j] * v[j];
         return result;
     }
 
-    static RealtimeTubeSim::Vector lu_decompose(Matrix& A) {
+    Vector lu_decompose(Matrix& A) {
         int n = A.size(); Vector p(n); for (int i = 0; i < n; ++i) p[i] = i;
         for (int i = 0; i < n; ++i) {
             int max_j = i;
@@ -331,7 +301,7 @@ private:
         } return p;
     }
 
-    static RealtimeTubeSim::Vector lu_solve(const Matrix& LU, const Vector& p_in, const Vector& b) {
+    Vector lu_solve(const Matrix& LU, const Vector& p_in, const Vector& b) {
         int n = LU.size(); Vector x(n), y(n);
         for(int i=0; i<n; ++i) {
             y[i] = b[static_cast<int>(p_in[i])];
