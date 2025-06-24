@@ -143,75 +143,75 @@ public:
         couplingCaps.push_back(std::make_unique<CapacitorFilter>(0.047e-6, fs)); // C9
         couplingCaps.push_back(std::make_unique<CapacitorFilter>(0.047e-6, fs)); // C12
         couplingCaps.push_back(std::make_unique<CapacitorFilter>(0.022e-6, fs)); // C25
-        
+        couplingCaps.push_back(std::make_unique<CapacitorFilter>(180e-12, fs));  // C13B (volume1 coupling)
+
         // Initialize tone stack
         toneStack = std::make_unique<ToneStack>(fs);
-        
+
         // Initialize node voltages
         nodeVoltages.resize(50, 0.0);
-        
+
         // Set default control values
         volume1 = 0.75;
         gain = 0.5;
         master = 0.5;
     }
-    
+
     void setControls(double vol1, double g, double m, double treble, double mid, double bass) {
         volume1 = std::max(0.0, std::min(1.0, vol1));
         gain = std::max(0.0, std::min(1.0, g));
         master = std::max(0.0, std::min(1.0, m));
         toneStack->setControls(treble, mid, bass);
     }
-    
+
     double processample(double input) {
         // Input stage with volume control
         double inputGain = volume1 * 2.0; // Scaling factor
         double scaledInput = input * inputGain;
-        
+
         // V1A - First preamp stage
         double v1aGrid = scaledInput;
         double v1aPlate = VE - tubes[0]->computePlateCurrent(VE, v1aGrid, 0) * 150000.0; // R4
         double v1aCoupled = couplingCaps[0]->process(v1aPlate, 1000000.0); // R1
-        
+
         // Apply tone stack
         double tonedSignal = toneStack->process(v1aCoupled);
-        
-        // V1B - Second preamp stage  
+
+        // V1B - Second preamp stage
         double v1bGrid = tonedSignal;
         double v1bPlate = VE - tubes[1]->computePlateCurrent(VE, v1bGrid, 0) * 100000.0; // R8
         double v1bCoupled = couplingCaps[1]->process(v1bPlate, 100000.0); // R9
-        
+
         // V2A - Third stage with gain control
         double gainFactor = gain * 3.0 + 0.5; // Gain control scaling
         double v2aGrid = v1bCoupled * gainFactor;
         double v2aPlate = VC2 - tubes[2]->computePlateCurrent(VC2, v2aGrid, 0) * 120000.0; // R19
         double v2aCoupled = couplingCaps[2]->process(v2aPlate, 47000.0); // R103
-        
+
         // V2B - Fourth stage
         double v2bGrid = v2aCoupled;
         double v2bPlate = VC2 - tubes[3]->computePlateCurrent(VC2, v2bGrid, 0) * 100000.0; // R13
         double v2bCoupled = couplingCaps[3]->process(v2bPlate, 47000.0); // R105
-        
+
         // V3B - Fifth stage (lead drive)
         double v3bGrid = v2bCoupled;
         double v3bPlate = VC - tubes[4]->computePlateCurrent(VC, v3bGrid, 0) * 82000.0; // R26
         double v3bCoupled = couplingCaps[4]->process(v3bPlate, 68000.0); // R24
-        
+
         // V4A - Final preamp stage
         double v4aGrid = v3bCoupled;
         double v4aPlate = VC - tubes[5]->computePlateCurrent(VC, v4aGrid, 0) * 274000.0; // R27
         double v4aCoupled = couplingCaps[5]->process(v4aPlate, 220000.0); // R31
-        
+
         // Master volume control and output scaling
         double output = v4aCoupled * master;
-        
+
         // Apply soft clipping for tube saturation
         output = softClip(output);
-        
-        // Final output scaling to match expected levels
-        return output / 1400.0; // Similar to E1 scaling in original netlist
+
+        return output;
     }
-    
+
 private:
     double softClip(double input) {
         // Tube-like soft clipping
@@ -233,12 +233,12 @@ private:
     std::vector<double> inputBuffer;
     std::vector<double> outputBuffer;
     size_t bufferSize;
-    
+
 public:
     AudioProcessor(size_t bufSize = 256) : bufferSize(bufSize) {
         inputBuffer.resize(bufferSize);
         outputBuffer.resize(bufferSize);
-        
+
         // Set up amplifier with typical settings
         amplifier.setControls(
             0.75,  // volume1
@@ -249,82 +249,79 @@ public:
             0.05   // bass
         );
     }
-    
+
     void processBlock(const double* input, double* output, size_t numSamples) {
         for (size_t i = 0; i < numSamples; ++i) {
             output[i] = amplifier.processample(input[i]);
         }
     }
-    
-    void setAmpControls(double volume1, double gain, double master, 
+
+    void setAmpControls(double volume1, double gain, double master,
                        double treble, double mid, double bass) {
         amplifier.setControls(volume1, gain, master, treble, mid, bass);
     }
-    
+
     // Demo function to show processing
     void demonstrateProcessing() {
         std::cout << "Mesa Boogie Mark IIC+ Tube Amplifier Simulator\n";
         std::cout << "==============================================\n\n";
-        
+
         // Generate test signal (sine wave)
         const size_t testLength = 1000;
         std::vector<double> testInput(testLength);
         std::vector<double> testOutput(testLength);
-        
+
         for (size_t i = 0; i < testLength; ++i) {
             // 440 Hz sine wave
-            testInput[i] = 0.75 * sin(2.0 * M_PI * 440.0 * static_cast<double>(i) / 48000.0);
+            testInput[i] = 0.1 * sin(2.0 * M_PI * 440.0 * i / 48000.0);
         }
 
         // Process the test signal
         processBlock(testInput.data(), testOutput.data(), testLength);
-        
+
         // Show some statistics
         double maxInput = *std::max_element(testInput.begin(), testInput.end());
         double maxOutput = *std::max_element(testOutput.begin(), testOutput.end());
         double minOutput = *std::min_element(testOutput.begin(), testOutput.end());
-        
+
         std::cout << "Test Signal Processing Results:\n";
         std::cout << "Input peak: " << maxInput << "\n";
         std::cout << "Output peak: " << maxOutput << "\n";
         std::cout << "Output range: " << minOutput << " to " << maxOutput << "\n";
         std::cout << "Gain: " << (maxOutput / maxInput) << "x\n\n";
-        
+
         // Test different settings
         std::cout << "Testing different amp settings:\n";
         std::cout << "--------------------------------\n";
-        
+
         struct Settings {
             const char* name;
             double vol, gain, master, treble, mid, bass;
         };
-        
+
         Settings presets[] = {
             {"Clean", 0.3, 0.2, 0.4, 0.6, 0.5, 0.4},
             {"Crunch", 0.6, 0.5, 0.5, 0.7, 0.6, 0.3},
             {"Lead", 0.8, 0.8, 0.6, 0.8, 0.4, 0.2},
             {"High Gain", 0.9, 0.9, 0.7, 0.9, 0.3, 0.1}
         };
-        
+
         for (const auto& preset : presets) {
-            setAmpControls(preset.vol, preset.gain, preset.master, 
+            setAmpControls(preset.vol, preset.gain, preset.master,
                           preset.treble, preset.mid, preset.bass);
-            
+
             // Process a single sample to show response
-            double testSample = 0.75;
+            double testSample = 0.1;
             double result = amplifier.processample(testSample);
-            
-            std::cout << preset.name << " setting: " 
-                      << "Input=" << testSample << " -> Output=" << result 
+
+            std::cout << preset.name << " setting: "
+                      << "Input=" << testSample << " -> Output=" << result
                       << " (Gain=" << (result/testSample) << "x)\n";
         }
     }
 };
 
 int main() {
-    //AudioProcessor processor;
-    //processor.demonstrateProcessing();
-    
     std::cout << "\nSimulator ready for real-time audio processing!\n";
     std::cout << "Use processBlock() method for real-time audio.\n";
 
