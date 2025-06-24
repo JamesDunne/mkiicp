@@ -79,13 +79,13 @@ public:
         if (m_node_map.find(name) == m_node_map.end()) m_node_map[name] = m_num_nodes++;
         return m_node_map[name];
     }
-    void add_resistor(const std::string& n1, const std::string& n2, double R) { m_resistors.push_back({m_node(n1), m_node(n2), R}); }
-    void add_capacitor(const std::string& n1, const std::string& n2, double C) { m_capacitors.push_back({m_node(n1), m_node(n2), C}); }
-    void add_voltage_source(const std::string& n_pos, const std::string& n_neg, double V, bool is_ac) {
+    void add_resistor(const std::string& name, const std::string& n1, const std::string& n2, double R) { m_resistors.push_back({name, m_node(n1), m_node(n2), R}); }
+    void add_capacitor(const std::string& name, const std::string& n1, const std::string& n2, double C) { m_capacitors.push_back({name, m_node(n1), m_node(n2), C}); }
+    void add_voltage_source(const std::string& name, const std::string& n_pos, const std::string& n_neg, double V, bool is_ac) {
         if (n_neg != "gnd" && n_neg != "0") throw std::runtime_error("V-sources must be grounded.");
-        m_v_sources.push_back({m_node(n_pos), V, is_ac});
+        m_v_sources.push_back({name, m_node(n_pos), V, is_ac});
     }
-    void add_triode(const std::string& p, const std::string& g, const std::string& k,
+    void add_triode(const std::string& name, const std::string& p, const std::string& g, const std::string& k,
         double mu = 96.2,
         double ex = 1.437,
         double kg1 = 613.4,
@@ -93,13 +93,13 @@ public:
         double kvb = 1672.0,
         double rgi = 2000.0
     ) {
-        m_triodes.push_back({m_node(p), m_node(g), m_node(k), mu, ex, kg1, kp, kvb, rgi});
+        m_triodes.push_back({name, m_node(p), m_node(g), m_node(k), mu, ex, kg1, kp, kvb, rgi});
     }
     void add_potentiometer(const std::string& name, const std::string& n1, const std::string& n2, const std::string& wiper, double R, char taper) {
-        m_potentiometers[name] = {m_node(n1), m_node(n2), m_node(wiper), R, 0.5, taper};
+        m_potentiometers[name] = {name, m_node(n1), m_node(n2), m_node(wiper), R, 0.5, taper};
     }
     void add_variable_resistor(const std::string& name, const std::string& n1, const std::string& n2, double R_max, char taper) {
-        m_variable_resistors[name] = {m_node(n1), m_node(n2), R_max, 0.5, taper};
+        m_variable_resistors[name] = {name, m_node(n1), m_node(n2), R_max, 0.5, taper};
     }
 
     // --- 2. Simulation Control ---
@@ -179,13 +179,13 @@ public:
         return output_sample;
     }
 
-private:
-    struct Resistor { int n1, n2; double R; };
-    struct Capacitor { int n1, n2; double C; };
-    struct VoltageSource { int node; double dc_voltage; bool is_time_varying; };
-    struct Triode { int p_node, g_node, k_node; double mu, ex, kg1, kp, kvb, rgi; };
-    struct Potentiometer { int n1, n2, wiper; double R_total; double value; char taper; };
-    struct VariableResistor { int n1, n2; double R_max; double value; char taper; };
+public:
+    struct Resistor { std::string name; int n1, n2; double R; };
+    struct Capacitor { std::string name; int n1, n2; double C; };
+    struct VoltageSource { std::string name; int node; double dc_voltage; bool is_time_varying; };
+    struct Triode { std::string name; int p_node, g_node, k_node; double mu, ex, kg1, kp, kvb, rgi; };
+    struct Potentiometer { std::string name; int n1, n2, wiper; double R_total; double value; char taper; };
+    struct VariableResistor { std::string name; int n1, n2; double R_max; double value; char taper; };
 
     std::vector<Resistor> m_resistors;
     std::vector<Capacitor> m_capacitors;

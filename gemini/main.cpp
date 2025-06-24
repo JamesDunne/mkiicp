@@ -29,73 +29,73 @@ void setup_markiicp(RealtimeTubeSim& sim) {
         sim.add_node(node);
     }
 
-    // Resistors - stamp conductances
-    sim.add_resistor("N004", "N015", 100e3);     // R5
-    sim.add_resistor("N008", "N007", 100e3);     // R5A
-    sim.add_resistor("N003", "N004", 150e3);     // R4
-    sim.add_resistor("N019", "0", 1e6);          // R1
-    sim.add_resistor("N033", "0", 1.5e3);        // R2
-    sim.add_resistor("N028", "0", 1.5e3);        // R7
-    sim.add_resistor("N003", "N009", 100e3);     // R8
-    sim.add_resistor("N001", "0", 100e3);        // R9
-    sim.add_resistor("N011", "N025", 680e3);     // R21
-    sim.add_resistor("N029", "0", 475e3);        // R22
-    sim.add_resistor("N035", "0", 1.5e3);        // R23
-    sim.add_resistor("N002", "N001", 3.3e6);     // R10
-    sim.add_resistor("N002", "0", 680e3);        // R11
-    sim.add_resistor("N017", "N010", 82e3);      // R26
-    sim.add_resistor("N030", "0", 68e3);         // R24
-    sim.add_resistor("N030", "N018", 270e3);     // R25
-    sim.add_resistor("N034", "0", 3.3e3);        // R30
-    sim.add_resistor("N026", "N010", 274e3);     // R27
-    sim.add_resistor("N002", "N027", 220e3);     // R31
-    sim.add_resistor("N036", "0", 1.5e3);        // R16
-    sim.add_resistor("N006", "N021", 100e3);     // R13
-    sim.add_resistor("N022", "P001", 47e3);      // R105
-    // sim.add_resistor("N022", "0", 47e3);         // R46 = lead_master
-    sim.add_resistor("N022", "N032", 150e3);     // R102
-    sim.add_resistor("N032", "0", 4.7e3);        // R101
-    sim.add_resistor("N006", "N012", 120e3);     // R19
-    sim.add_resistor("N023", "0", 47e3);         // R103
-    sim.add_resistor("N031", "0", 1e3);          // R104
-    sim.add_resistor("N023", "N032", 2.2e3);     // R12
-    sim.add_resistor("N014", "N013", 15e3);      // R106
-    sim.add_resistor("N005", "N005", 10e6);      // R6
-    sim.add_resistor("N002", "0", 100e3);        // R32
+    // Resistors
+    sim.add_resistor("R5", "N004", "N015", 100e3);     // R5
+    sim.add_resistor("R5A", "N008", "N007", 100e3);     // R5A
+    sim.add_resistor("R4", "N003", "N004", 150e3);     // R4
+    sim.add_resistor("R1", "N019", "0", 1e6);          // R1
+    sim.add_resistor("R2", "N033", "0", 1.5e3);        // R2
+    sim.add_resistor("R7", "N028", "0", 1.5e3);        // R7
+    sim.add_resistor("R8", "N003", "N009", 100e3);     // R8
+    sim.add_resistor("R9", "N001", "0", 100e3);        // R9
+    sim.add_resistor("R21", "N011", "N025", 680e3);     // R21
+    sim.add_resistor("R22", "N029", "0", 475e3);        // R22
+    sim.add_resistor("R23", "N035", "0", 1.5e3);        // R23
+    sim.add_resistor("R10", "N002", "N001", 3.3e6);     // R10
+    sim.add_resistor("R11", "N002", "0", 680e3);        // R11
+    sim.add_resistor("R26", "N017", "N010", 82e3);      // R26
+    sim.add_resistor("R24", "N030", "0", 68e3);         // R24
+    sim.add_resistor("R25", "N030", "N018", 270e3);     // R25
+    sim.add_resistor("R30", "N034", "0", 3.3e3);        // R30
+    sim.add_resistor("R27", "N026", "N010", 274e3);     // R27
+    sim.add_resistor("R31", "N002", "N027", 220e3);     // R31
+    sim.add_resistor("R16", "N036", "0", 1.5e3);        // R16
+    sim.add_resistor("R13", "N006", "N021", 100e3);     // R13
+    sim.add_resistor("R105", "N022", "P001", 47e3);      // R105
+    // sim.add_resistor("R46", "N022", "0", 47e3);         // R46 = lead_master
+    sim.add_resistor("R102", "N022", "N032", 150e3);     // R102
+    sim.add_resistor("R101", "N032", "0", 4.7e3);        // R101
+    sim.add_resistor("R19", "N006", "N012", 120e3);     // R19
+    sim.add_resistor("R103", "N023", "0", 47e3);         // R103
+    sim.add_resistor("R104", "N031", "0", 1e3);          // R104
+    sim.add_resistor("R12", "N023", "N032", 2.2e3);     // R12
+    sim.add_resistor("R106", "N014", "N013", 15e3);      // R106
+    //sim.add_resistor("R6", "N005", "N005", 10e6);      // R6 (bypassed)
+    sim.add_resistor("R32", "N002", "0", 100e3);        // R32
 
     // Capacitors
-    sim.add_capacitor("N005", "N004", 750e-12);  // C6
-    sim.add_capacitor("N005", "N004", 250e-12);  // C5 (parallel with C6)
-    sim.add_capacitor("N016", "N015", 0.1e-6);   // C4
-    sim.add_capacitor("N024", "N015", 0.047e-6); // C3
-    sim.add_capacitor("N020", "N008", 180e-12);  // C13B
-    sim.add_capacitor("N033", "0", 0.47e-6);     // C1
-    sim.add_capacitor("N033", "0", 22e-6);       // C2
-    sim.add_capacitor("N028", "0", 22e-6);       // C13
-    sim.add_capacitor("N001", "N009", 0.1e-6);   // C7
-    sim.add_capacitor("N035", "N029", 120e-12);  // C22
-    sim.add_capacitor("N035", "0", 2.2e-6);      // C23
-    sim.add_capacitor("N002", "N001", 20e-12);   // C10
-    sim.add_capacitor("N030", "0", 1000e-12);    // C24
-    sim.add_capacitor("N034", "0", 0.22e-6);     // C29
-    sim.add_capacitor("N027", "N026", 0.047e-6); // C30
-    sim.add_capacitor("N002", "N027", 250e-12);  // C31
-    sim.add_capacitor("P001", "N021", 0.047e-6); // C9
-    sim.add_capacitor("N013", "N012", 0.047e-6); // C12
-    sim.add_capacitor("N002", "0", 47e-12);      // C11
-    sim.add_capacitor("N031", "0", 0.47e-6);     // C16
-    sim.add_capacitor("N031", "0", 15e-6);       // C15
-    sim.add_capacitor("N001", "N011", 0.02e-6);  // C21
-    sim.add_capacitor("N002", "0", 500e-12);     // C32
-    sim.add_capacitor("N018", "N017", 0.022e-6); // C25
+    sim.add_capacitor("C6", "N005", "N004", 750e-12);  // C6
+    sim.add_capacitor("C5", "N005", "N004", 250e-12);  // C5 (parallel with C6)
+    sim.add_capacitor("C4", "N016", "N015", 0.1e-6);   // C4
+    sim.add_capacitor("C3", "N024", "N015", 0.047e-6); // C3
+    sim.add_capacitor("C13B", "N020", "N008", 180e-12);  // C13B
+    sim.add_capacitor("C1", "N033", "0", 0.47e-6);     // C1
+    sim.add_capacitor("C2", "N033", "0", 22e-6);       // C2
+    sim.add_capacitor("C13", "N028", "0", 22e-6);       // C13
+    sim.add_capacitor("C7", "N001", "N009", 0.1e-6);   // C7
+    sim.add_capacitor("C22", "N035", "N029", 120e-12);  // C22
+    sim.add_capacitor("C23", "N035", "0", 2.2e-6);      // C23
+    sim.add_capacitor("C10", "N002", "N001", 20e-12);   // C10
+    sim.add_capacitor("C24", "N030", "0", 1000e-12);    // C24
+    sim.add_capacitor("C29", "N034", "0", 0.22e-6);     // C29
+    sim.add_capacitor("C30", "N027", "N026", 0.047e-6); // C30
+    sim.add_capacitor("C31", "N002", "N027", 250e-12);  // C31
+    sim.add_capacitor("C9", "P001", "N021", 0.047e-6); // C9
+    sim.add_capacitor("C12", "N013", "N012", 0.047e-6); // C12
+    sim.add_capacitor("C11", "N002", "0", 47e-12);      // C11
+    sim.add_capacitor("C16", "N031", "0", 0.47e-6);     // C16
+    sim.add_capacitor("C15", "N031", "0", 15e-6);       // C15
+    sim.add_capacitor("C21", "N001", "N011", 0.02e-6);  // C21
+    sim.add_capacitor("C32", "N002", "0", 500e-12);     // C32
+    sim.add_capacitor("C25", "N018", "N017", 0.022e-6); // C25
 
     // input:
-    sim.add_voltage_source("N019", "0", 0.0, true);  // Vin
+    sim.add_voltage_source("Vin", "N019", "0", 0.0, true);  // Vin
 
     // Voltage sources (DC bias)
-    sim.add_voltage_source("N003", "0", 405, false); // VE
-    sim.add_voltage_source("N010", "0", 410, false); // VC
-    sim.add_voltage_source("N006", "0", 410, false); // VC2
+    sim.add_voltage_source("VE", "N003", "0", 405, false); // VE
+    sim.add_voltage_source("VC", "N010", "0", 410, false); // VC
+    sim.add_voltage_source("VC2", "N006", "0", 410, false); // VC2
 
     // tone stack:
     sim.add_potentiometer("treble", "N005", "N016", "N007", 250e3, 'A');
@@ -121,22 +121,22 @@ void setup_markiicp(RealtimeTubeSim& sim) {
     // rgi = 2000.0
 
     // XV1A: 12AX7 N004 N019 N033
-    sim.add_triode("N004", "N019", "N033");
+    sim.add_triode("XV1A", "N004", "N019", "N033");
 
     // XV1B: 12AX7 N009 N020 N028
-    sim.add_triode("N009", "N020", "N028");
+    sim.add_triode("XV1B", "N009", "N020", "N028");
 
     // XV3B: 12AX7 N017 N029 N035
-    sim.add_triode("N017", "N029", "N035");
+    sim.add_triode("XV3B", "N017", "N029", "N035");
 
     // XV4A: 12AX7 N026 N030 N034
-    sim.add_triode("N026", "N030", "N034");
+    sim.add_triode("XV4A", "N026", "N030", "N034");
 
     // XV2B: 12AX7 N021 N002 N036
-    sim.add_triode("N021", "N002", "N036");
+    sim.add_triode("XV2B", "N021", "N002", "N036");
 
     // XV2A: 12AX7 N012 N023 N031
-    sim.add_triode("N012", "N023", "N031");
+    sim.add_triode("XV2A", "N012", "N023", "N031");
 
     // capture output from N014 after master volume:
     sim.set_output_node("N014");
@@ -151,16 +151,16 @@ void setup_basic_tube_preamp(RealtimeTubeSim& sim) {
     sim.add_node("out"); sim.add_node("out_final");
 
     // --- Static Components ---
-    sim.add_resistor("g", "gnd", 1e6);        // Grid leak
-    sim.add_resistor("V_P", "p", 100e3);      // Plate load
-    sim.add_resistor("k", "gnd", 1.5e3);       // Cathode resistor
-    sim.add_resistor("out_final", "gnd", 1e6);// Final load
-    sim.add_capacitor("in", "g", 22e-9);      // Input cap
-    sim.add_capacitor("k", "gnd", 22e-6);     // Cathode bypass
-    sim.add_capacitor("p", "ts1", 22e-9);     // Coupling cap to tone stack
-    sim.add_capacitor("ts1", "ts3", 250e-12);  // Treble cap
-    sim.add_capacitor("ts2", "ts3", 22e-9);    // Mid cap
-    sim.add_capacitor("out", "out_final", 100e-9); // Output cap
+    sim.add_resistor("R1", "g", "gnd", 1e6);        // Grid leak
+    sim.add_resistor("R2", "V_P", "p", 100e3);      // Plate load
+    sim.add_resistor("R3", "k", "gnd", 1.5e3);       // Cathode resistor
+    sim.add_resistor("R4", "out_final", "gnd", 1e6);// Final load
+    sim.add_capacitor("C1", "in", "g", 22e-9);      // Input cap
+    sim.add_capacitor("C2", "k", "gnd", 22e-6);     // Cathode bypass
+    sim.add_capacitor("C3", "p", "ts1", 22e-9);     // Coupling cap to tone stack
+    sim.add_capacitor("C4", "ts1", "ts3", 250e-12);  // Treble cap
+    sim.add_capacitor("C5", "ts2", "ts3", 22e-9);    // Mid cap
+    sim.add_capacitor("C6", "out", "out_final", 100e-9); // Output cap
 
     // --- Dynamic Components (Pots/Variable Resistors) ---
     sim.add_variable_resistor("treble", "ts1", "ts2", 250e3, 'L');
@@ -169,11 +169,11 @@ void setup_basic_tube_preamp(RealtimeTubeSim& sim) {
     sim.add_potentiometer("master", "ts3", "gnd", "out", 1e6, 'A');
 
     // --- Active Components ---
-    sim.add_triode("p", "g", "k", 96.2, 1.437, 613.4, 740.3, 1672.0, 2000.0);
+    sim.add_triode("V1A", "p", "g", "k", 96.2, 1.437, 613.4, 740.3, 1672.0, 2000.0);
 
     // --- Sources ---
-    sim.add_voltage_source("V_P", "gnd", 300.0, false);
-    sim.add_voltage_source("in", "gnd", 0.0, true);
+    sim.add_voltage_source("V_P", "V_P", "gnd", 300.0, false);
+    sim.add_voltage_source("Vin", "in", "gnd", 0.0, true);
 }
 
 void simulate_sine_sweep(RealtimeTubeSim& sim, const double sampleRate) {
@@ -227,7 +227,7 @@ int main(int argc, char *argv[]) {
     sim.set_parameter("mid", 0.57445626);
     sim.set_parameter("bass", 0.2236068);
     sim.set_parameter("lead_master", 0.90111043);
-    sim.set_parameter("master", 0.0125);
+    sim.set_parameter("master", 0.70710678);
 
     sim.prepare_to_play();
 
@@ -237,22 +237,13 @@ int main(int argc, char *argv[]) {
         const std::string input_filename = argv[1];
         const std::string output_filename = argv[2];
 
-        // Define your audio processing logic here. A lambda is a great choice.
-        // Example 1: Reduce volume by 50%
-        auto volume_reducer = [](double sample) {
-            return sample * 0.5;
-        };
-
-        // Example 2: Simple distortion (hard clipping)
-        auto simple_distortion = [](double sample) {
-            double boosted_sample = sample * 2.0; // Increase gain
-            return std::max(-1.0, std::min(1.0, boosted_sample)); // Clip to [-1, 1]
-        };
-
+        std::cout << "t,N019,N007,N020,N029,N030,N002,N023,N014" << std::endl;
         double minV = 1.0;
         double maxV = -0.0;
+        double t = 0.0;
         auto ampsim_process = [&](double sample) -> double {
             double out = sim.process_sample(sample) / 200.0;
+#if 0
             if (out > maxV) {
                 maxV = out;
                 std::cout << "min=" << minV << " max=" << maxV << std::endl;
@@ -261,11 +252,23 @@ int main(int argc, char *argv[]) {
                 minV = out;
                 std::cout << "min=" << minV << " max=" << maxV << std::endl;
             }
+#endif
+            std::cout << t
+                // << "," << sim.m_x.at(sim.m_node("N019"))
+                // << "," << sim.m_x.at(sim.m_node("N007"))
+                << "," << sim.m_x.at(sim.m_node("N004"))
+                // << "," << sim.m_x.at(sim.m_node("N020"))
+                // << "," << sim.m_x.at(sim.m_node("N029"))
+                // << "," << sim.m_x.at(sim.m_node("N030"))
+                // << "," << sim.m_x.at(sim.m_node("N002"))
+                // << "," << sim.m_x.at(sim.m_node("N023"))
+                // << "," << out
+                << std::endl;
+
+            t += 1.0 / sampleRate;
             return out;
         };
 
-        // Call the reusable processing function with the desired effect.
-        // Change 'volume_reducer' to 'simple_distortion' to apply a different effect.
         processWavFile(input_filename, output_filename, ampsim_process);
 
         std::cout << "min=" << minV << " max=" << maxV << std::endl;
