@@ -1,5 +1,7 @@
 
+#include <cassert>
 #include <iostream>
+#include <ranges>
 
 #include "sim.hpp"
 
@@ -205,6 +207,59 @@ void simulate_sine_sweep(RealtimeTubeSim& sim, const double sampleRate) {
     }
 }
 
+void dump_netlist(const RealtimeTubeSim & sim) {
+    for (const auto& r : sim.m_resistors) {
+        assert(r.name.at(0) == 'R');
+        std::cout << r.name << " " << sim.name_of(r.n1) << " " << sim.name_of(r.n2) << " " << r.R << std::endl;
+    }
+    for (const auto& c : sim.m_capacitors) {
+        assert(c.name.at(0) == 'C');
+        std::cout << c.name << " " << sim.name_of(c.n1) << " " << sim.name_of(c.n2) << " " << c.C << std::endl;
+    }
+    for (const auto &r: sim.m_variable_resistors | std::views::values) {
+        std::cout << "Rv_" << r.name << " " << sim.name_of(r.n1) << " " << sim.name_of(r.n2) << " {" << r.R_max << "*(1-" << r.name << "}" << std::endl;
+        double w = r.value;
+        if (r.taper == 'A' || r.taper == 'a') {
+            w = w * w;
+        }
+        std::cout << ".param " << r.name << " " << w << std::endl;
+    }
+    for (const auto &p: sim.m_potentiometers | std::views::values) {
+        std::cout << "Rpa_" << p.name << " " << sim.name_of(p.n1) << " " << sim.name_of(p.wiper) << " {" << p.R_total << "*(1-" << p.name << "}" << std::endl;
+        std::cout << "Rpc_" << p.name << " " << sim.name_of(p.wiper) << " " << sim.name_of(p.n2) << " {" << p.R_total << "*(" << p.name << "}" << std::endl;
+        double w = p.value;
+        if (p.taper == 'A' || p.taper == 'a') {
+            w = w * w;
+        }
+        std::cout << ".param " << p.name << " " << w << std::endl;
+    }
+    for (const auto &t: sim.m_triodes) {
+        assert(t.name.at(0) == 'X');
+        std::cout << t.name << " " << sim.name_of(t.p_node) << " " << sim.name_of(t.g_node) << " " << sim.name_of(t.k_node) << " 12AX7" << std::endl;
+    }
+    for (const auto &v : sim.m_v_sources) {
+        assert(v.name.at(0) == 'V');
+        std::cout << v.name << " " << sim.name_of(v.node) << " 0";
+        if (v.is_time_varying) {
+            // input wave file:f
+            std::cout << " wavefile=di-cut.wav";
+        } else {
+            std::cout << " " << v.dc_voltage;
+        }
+        std::cout << std::endl;
+    }
+
+    std::cout << "Ewout wout 0 " << sim.name_of(sim.m_output_node) << " 0 {1/1400}" << std::endl;
+    // output wave file:
+    std::cout << ".wave mkiicp-out.wav 16 48000 V(wout)" << std::endl;
+
+    std::cout << ".inc 12AX7.cir" << std::endl;
+
+    std::cout << ".tran 0.0000026 10" << std::endl;
+    std::cout << ".backanno" << std::endl;
+    std::cout << ".end" << std::endl;
+}
+
 int main(int argc, char *argv[]) {
     if (argc != 3) {
         std::cerr << "Usage: " << argv[0] << " <input.wav> <output.wav>" << std::endl;
@@ -221,7 +276,8 @@ int main(int argc, char *argv[]) {
 #endif
 
     // Set controls for IIC+:
-    sim.set_parameter("volume1", 0.68556546); // hard-coded from Mark V IIC+ mode (470kOhm)
+    // sim.set_parameter("volume1", 0.68556546); // hard-coded from Mark V IIC+ mode (470kOhm)
+    sim.set_parameter("volume1", 0.8660254);
     sim.set_parameter("lead_drive", 0.70710678);
     sim.set_parameter("treble", 0.89442719);
     sim.set_parameter("mid", 0.57445626);
@@ -231,19 +287,20 @@ int main(int argc, char *argv[]) {
 
     sim.prepare_to_play();
 
+    dump_netlist(sim);
+
     //simulate_sine_sweep(sim, sampleRate);
 
     try {
         const std::string input_filename = argv[1];
         const std::string output_filename = argv[2];
 
-        std::cout << "t,N019,N007,N020,N029,N030,N002,N023,N014" << std::endl;
         double minV = 1.0;
         double maxV = -0.0;
         double t = 0.0;
         auto ampsim_process = [&](double sample) -> double {
             double out = sim.process_sample(sample) / 200.0;
-#if 0
+#if MINMAX
             if (out > maxV) {
                 maxV = out;
                 std::cout << "min=" << minV << " max=" << maxV << std::endl;
@@ -253,6 +310,7 @@ int main(int argc, char *argv[]) {
                 std::cout << "min=" << minV << " max=" << maxV << std::endl;
             }
 #endif
+#if CSV
             std::cout << t
                 // << "," << sim.m_x.at(sim.m_node("N019"))
                 // << "," << sim.m_x.at(sim.m_node("N007"))
@@ -264,15 +322,18 @@ int main(int argc, char *argv[]) {
                 // << "," << sim.m_x.at(sim.m_node("N023"))
                 // << "," << out
                 << std::endl;
-
             t += 1.0 / sampleRate;
+#endif
             return out;
         };
 
+#if CSV
+        std::cout << "t,N019,N007,N020,N029,N030,N002,N023,N014" << std::endl;
+#endif
         processWavFile(input_filename, output_filename, ampsim_process);
-
+#if MINMAX
         std::cout << "min=" << minV << " max=" << maxV << std::endl;
-
+#endif
         std::cout << "Successfully processed " << input_filename << " to " << output_filename << std::endl;
 
     } catch (const std::exception& e) {

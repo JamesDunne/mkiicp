@@ -74,9 +74,17 @@ public:
         m_dt = 1.0 / sample_rate;
     }
 
+    [[nodiscard]] std::string name_of(int node) const {
+        if (node == -1) return "0";
+        return m_node_map_rev.find(node)->second;
+    }
+
     // --- 1. Circuit Building API ---
     int add_node(const std::string& name) {
-        if (m_node_map.find(name) == m_node_map.end()) m_node_map[name] = m_num_nodes++;
+        if (m_node_map.find(name) == m_node_map.end()) {
+            m_node_map[name] = m_num_nodes++;
+            m_node_map_rev[m_num_nodes - 1] = name;
+        }
         return m_node_map[name];
     }
     void add_resistor(const std::string& name, const std::string& n1, const std::string& n2, double R) { m_resistors.push_back({name, m_node(n1), m_node(n2), R}); }
@@ -198,6 +206,7 @@ public:
     Vector m_x, m_x_prev;
     int m_num_nodes = 0;
     std::map<std::string, int> m_node_map;
+    std::map<int, std::string> m_node_map_rev;
     bool m_is_prepared = false;
     bool m_params_dirty = true;
 
