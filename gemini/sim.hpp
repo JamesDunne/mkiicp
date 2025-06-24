@@ -135,6 +135,7 @@ public:
         m_C_mat.assign(m_num_nodes, Vector(m_num_nodes, 0.0));
         m_x.assign(m_num_nodes, 0.0);
         m_x_prev.assign(m_num_nodes, 0.0);
+        m_x_prev2.assign(m_num_nodes, 0.0); // Init history
 
         for(const auto& r : m_resistors) stamp_resistor(m_G_static, r.n1, r.n2, r.R);
         for(const auto& c : m_capacitors) stamp_capacitor(c.n1, c.n2, c.C);
@@ -162,6 +163,48 @@ public:
             double voltage = vs.is_time_varying ? input_sample : vs.dc_voltage;
             b[vs.node] += voltage * G_LARGE;
         }
+#if 0
+        // --- CONVERGENCE FIX 1: Extrapolate a better initial guess ---
+        for (size_t i = 0; i < m_num_nodes; ++i) {
+            m_x[i] = 2.0 * m_x_prev[i] - m_x_prev2[i];
+        }
+
+        for (int i = 0; i < m_nr_max_iter; ++i) {
+            Matrix J = m_G_dynamic;
+            for(int r=0; r<m_num_nodes; ++r) for(int c=0; c<m_num_nodes; ++c) J[r][c] += m_C_mat[r][c] / m_dt;
+
+            Vector f = eval_f(m_x, b);
+            add_all_nonlinear_stamps(J, f, m_x);
+
+            // --- CONVERGENCE FIX 3: Adaptive Damping (Line Search) ---
+            double initial_error_norm = vector_norm(f);
+
+            for(size_t j=0; j<f.size(); ++j) f[j] = -f[j];
+            auto p = lu_decompose(J);
+            Vector dx = lu_solve(J, p, f);
+
+            double step_damping = 1.0;
+            Vector next_x = m_x;
+            for(int k=0; k<10; ++k) { // Try up to 10 step reductions
+                next_x = m_x;
+                for(int n=0; n<m_num_nodes; ++n) next_x[n] += step_damping * dx[n];
+
+                Vector next_f = eval_f(next_x, b);
+                if (vector_norm(next_f) < initial_error_norm) {
+                    m_x = next_x; // Good step, accept it
+                    break;
+                }
+                step_damping /= 2.0; // Bad step, reduce size and try again
+                if (k == 9) m_x = next_x; // Failsafe, accept last attempt
+            }
+
+            double norm = 0.0; for(double val : dx) norm += val * val;
+            if (sqrt(norm * step_damping) < m_nr_tolerance) break;
+        }
+
+        m_x_prev2 = m_x_prev;
+        m_x_prev = m_x;
+#else
         m_x = m_x_prev;
 
         int iter;
@@ -188,6 +231,7 @@ public:
             std::cerr << "too many iterations; norm=" << sqrt(norm_min) << std::endl;
         }
         m_x_prev = m_x;
+#endif
 
         double output_sample = m_x.at(m_output_node);
         return output_sample;
@@ -209,7 +253,7 @@ public:
     std::map<std::string, VariableResistor> m_variable_resistors;
 
     Matrix m_G_static, m_G_dynamic, m_C_mat;
-    Vector m_x, m_x_prev;
+    Vector m_x, m_x_prev, m_x_prev2;
     int m_num_nodes = 0;
     std::map<std::string, int> m_node_map;
     std::map<int, std::string> m_node_map_rev;
@@ -270,6 +314,44 @@ public:
         m_x_prev = m_x;
     }
 
+#if 1
+    // A helper to evaluate the linear part of the system residual `f(x)`
+    Vector eval_f(const Vector& x_eval, const Vector& b) {
+        Vector Gx = matrix_vector_mult(m_G_dynamic, x_eval);
+        Vector x_diff = x_eval; for(size_t k=0; k<x_eval.size(); ++k) x_diff[k] -= m_x_prev[k];
+        Vector C_x_diff_dt = matrix_vector_mult(m_C_mat, x_diff); for(size_t k=0; k<x_eval.size(); ++k) C_x_diff_dt[k] /= m_dt;
+        Vector f(m_num_nodes); for(size_t k=0; k<f.size(); ++k) f[k] = Gx[k] + C_x_diff_dt[k] - b[k];
+        return f;
+    }
+
+    double vector_norm(const Vector& v) {
+        double norm = 0.0; for (double val : v) norm += val * val; return sqrt(norm);
+    }
+
+    static void get_triode_currents(const Triode& t, double Vp, double Vg, double Vk, double& Ip, double& Ig) {
+        const double Vpk = Vp - Vk, Vgk = Vg - Vk;
+        const double kvb_vpk_sq = t.kvb + Vpk * Vpk;
+        Ip = 0; Ig = 0;
+
+        if (kvb_vpk_sq > 0) {
+            const double inner_exp = t.kp * (1.0 / t.mu + Vgk / sqrt(kvb_vpk_sq));
+            // The softplus function log(1+exp(x)) is naturally smooth.
+            // Avoid artificial cutoffs. Check for infinity instead.
+            double exp_val = exp(inner_exp);
+            if (!std::isinf(exp_val)) {
+                double E1 = (Vpk / t.kp) * log(1.0 + exp_val);
+                if (E1 > 0) {
+                    Ip = pow(E1, t.ex) / t.kg1;
+                }
+            } else {
+                throw std::runtime_error("exp_val went InF!");
+            }
+        }
+        if (Vgk > 0) {
+            Ig = (Vgk * Vgk) / (t.rgi + Vgk);
+        }
+    }
+#else
     static void get_triode_currents(const Triode& t, double Vp, double Vg, double Vk, double& Ip, double& Ig) {
         const double Vpk = Vp - Vk, Vgk = Vg - Vk;
         const double kvb_vpk_sq = t.kvb + Vpk * Vpk;
@@ -279,10 +361,13 @@ public:
             if (inner_exp < 100) { // log(1+exp(x)) is ~x for large x
                 double E1 = (Vpk / t.kp) * log(1.0 + exp(inner_exp));
                 if (E1 > 0) Ip = pow(E1, t.ex) / t.kg1;
+            // } else {
+            //     throw std::runtime_error("inner_exp >= 100");
             }
         }
         Ig = (Vgk > 0) ? (Vgk * Vgk) / (t.rgi + Vgk) : 0;
     }
+#endif
 
     void add_single_triode_stamps_numerical(const Triode& t, Matrix& J, Vector& f, const Vector& x) {
         double Vp=x[t.p_node], Vg=x[t.g_node], Vk=x[t.k_node];
