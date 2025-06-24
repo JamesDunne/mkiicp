@@ -5,6 +5,7 @@
 #include <string>
 #include <cmath>
 #include <algorithm>
+#include <cassert>
 #include <memory>
 
 class MKIICSimulator {
@@ -21,7 +22,8 @@ private:
 
     // Node mapping from SPICE netlist
     std::map<std::string, int> nodeMap;
-    int numNodes;
+    int numNodes, numVSources;
+    int kSystemSize;
 
     // MNA matrices
     std::vector<std::vector<double>> G; // Conductance matrix
@@ -48,13 +50,11 @@ private:
     } tubeParams;
 
     // Tube instances
-    struct TubeStage {
+    struct Triode {
         int anode, grid, cathode;
-        double va_prev = 0, vg_prev = 0, vc_prev = 0;
-        double ia_prev = 0;
     };
 
-    std::vector<TubeStage> tubes;
+    std::vector<Triode> tubes;
 
     // Sample rate and time step
     double sampleRate = 48000.0;
@@ -80,21 +80,10 @@ public:
     // Main processing function
     double processSample(double input) {
         // Set input voltage source
-        int inputNode = nodeMap["N019"];
+        int inputNode = nodeMap["Vin"];
         b[inputNode] = input;
 
-        // Newton-Raphson iteration for nonlinear elements (tubes)
-        const int maxIterations = 5;
-        const double tolerance = 1e-6;
-
-        for (int iter = 0; iter < maxIterations; iter++) {
-            // Solve linear system Ax = b
-            solveLU();
-
-            // Update tube nonlinearities
-            bool converged = updateTubeStages(tolerance);
-            if (converged) break;
-        }
+        newtonRaphsonSolve();
 
         // Store previous solution for next time step
         x_prev = x;
@@ -116,23 +105,33 @@ private:
             "N021", "N022", "N023", "N024", "N025", "N026", "N027", "N028", "N029", "N030",
             "N031", "N032", "N033", "N034", "N035", "N036", "P001"
         };
+        std::vector<std::string> vsources = {
+            "Vin", "VE", "VC", "VC2"
+        };
 
-        for (size_t i = 0; i < nodes.size(); i++) {
+        int i;
+        for (i = 0; i < nodes.size(); i++) {
             nodeMap[nodes[i]] = i + 1;
         }
-
         numNodes = nodes.size() + 1; // +1 for ground
 
+        for (size_t j = 0; j < vsources.size(); j++, i++) {
+            nodeMap[vsources[j]] = i + 1;
+        }
+        numVSources = vsources.size();
+
+        kSystemSize = numNodes + numVSources;
+
         // Initialize matrices
-        G.assign(numNodes, std::vector<double>(numNodes, 0.0));
-        C.assign(numNodes, std::vector<double>(numNodes, 0.0));
-        b.assign(numNodes, 0.0);
-        x.assign(numNodes, 0.0);
-        x_prev.assign(numNodes, 0.0);
+        G.assign(kSystemSize, std::vector<double>(kSystemSize, 0.0));
+        C.assign(kSystemSize, std::vector<double>(kSystemSize, 0.0));
+        b.assign(kSystemSize, 0.0);
+        x.assign(kSystemSize, 0.0);
+        x_prev.assign(kSystemSize, 0.0);
 
         // Initialize LU decomposition storage
-        LU.assign(numNodes, std::vector<double>(numNodes, 0.0));
-        pivot.assign(numNodes, 0);
+        LU.assign(kSystemSize, std::vector<double>(kSystemSize, 0.0));
+        pivot.assign(kSystemSize, 0);
 
         // Stamp passive components
         stampPassiveComponents();
@@ -210,10 +209,13 @@ private:
         stampCapacitor("N002", "0", 500e-12);     // C32
         stampCapacitor("N018", "N017", 0.022e-6); // C25
 
+        // input:
+        stampVoltageSource("Vin", "N019", "0", 1.0); // Vin
+
         // Voltage sources (DC bias)
-        stampVoltageSource("N003", "0", 405);     // VE
-        stampVoltageSource("N010", "0", 410);     // VC
-        stampVoltageSource("N006", "0", 410);     // VC2
+        stampVoltageSource("VE", "N003", "0", 405);      // VE
+        stampVoltageSource("VC", "N010", "0", 410);      // VC
+        stampVoltageSource("VC2", "N006", "0", 410);     // VC2
     }
 
     void stampResistor(const std::string& n1, const std::string& n2, double R) {
@@ -289,20 +291,19 @@ private:
         }
     }
 
-    void stampVoltageSource(const std::string& nPos, const std::string& nNeg, double voltage) {
-        int pos = nodeMap[nPos];
-        int neg = nodeMap[nNeg];
-
-        // Simple voltage source implementation - add large conductance
-        double largeG = 1e6;
-        if (pos != 0) {
-            G[pos][pos] += largeG;
-            b[pos] += largeG * voltage;
+    void stampVoltageSource(const std::string& name, const std::string& nPos, const std::string& nNeg, double voltage) {
+        int k = nodeMap[name];
+        int n_plus = nodeMap[nPos];
+        if (n_plus != 0) {
+            G[n_plus][k] += 1.0;
+            G[k][n_plus] += 1.0;
         }
-        if (neg != 0) {
-            G[neg][neg] += largeG;
-            b[neg] -= largeG * voltage;
+        int n_minus = nodeMap[nNeg];
+        if (n_minus != 0) {
+            G[n_minus][k] -= 1.0;
+            G[k][n_minus] -= 1.0;
         }
+        b[k] = voltage;
     }
 
     void updateToneStack() {
@@ -356,28 +357,28 @@ private:
         stampVariableResistor("RA_MASTER", "N014", "0", 1e6 * (1 - master));
         // Note: RC_MASTER connects 0 to 0 which is meaningless, so we skip it
     }
-    
+
     void initializeTubeStages() {
         // Add tube stages based on SPICE netlist
         tubes.resize(6);
         
         // XV1A: 12AX7 N004 N019 N033
-        tubes[0] = {nodeMap["N004"], nodeMap["N019"], nodeMap["N033"], 0, 0, 0, 0};
+        tubes[0] = {nodeMap["N004"], nodeMap["N019"], nodeMap["N033"]};
         
         // XV1B: 12AX7 N009 N020 N028  
-        tubes[1] = {nodeMap["N009"], nodeMap["N020"], nodeMap["N028"], 0, 0, 0, 0};
+        tubes[1] = {nodeMap["N009"], nodeMap["N020"], nodeMap["N028"]};
         
         // XV3B: 12AX7 N017 N029 N035
-        tubes[2] = {nodeMap["N017"], nodeMap["N029"], nodeMap["N035"], 0, 0, 0, 0};
+        tubes[2] = {nodeMap["N017"], nodeMap["N029"], nodeMap["N035"]};
         
         // XV4A: 12AX7 N026 N030 N034
-        tubes[3] = {nodeMap["N026"], nodeMap["N030"], nodeMap["N034"], 0, 0, 0, 0};
+        tubes[3] = {nodeMap["N026"], nodeMap["N030"], nodeMap["N034"]};
         
         // XV2B: 12AX7 N021 N002 N036
-        tubes[4] = {nodeMap["N021"], nodeMap["N002"], nodeMap["N036"], 0, 0, 0, 0};
+        tubes[4] = {nodeMap["N021"], nodeMap["N002"], nodeMap["N036"]};
         
         // XV2A: 12AX7 N012 N023 N031
-        tubes[5] = {nodeMap["N012"], nodeMap["N023"], nodeMap["N031"], 0, 0, 0, 0};
+        tubes[5] = {nodeMap["N012"], nodeMap["N023"], nodeMap["N031"]};
     }
     
     void updateCapacitorStamps() {
@@ -387,8 +388,8 @@ private:
     
     void updateSystemMatrix() {
         // Combine G and C matrices with backward Euler integration: (G + C/dt) * x = b + C/dt * x_prev
-        for (int i = 0; i < numNodes; i++) {
-            for (int j = 0; j < numNodes; j++) {
+        for (int i = 0; i < kSystemSize; i++) {
+            for (int j = 0; j < kSystemSize; j++) {
                 LU[i][j] = G[i][j] + C[i][j] / dt;
             }
         }
@@ -398,14 +399,14 @@ private:
     }
     
     void luDecompose() {
-        for (int i = 0; i < numNodes; i++) {
+        for (int i = 0; i < kSystemSize; i++) {
             pivot[i] = i;
         }
         
-        for (int k = 0; k < numNodes - 1; k++) {
+        for (int k = 0; k < kSystemSize - 1; k++) {
             // Find pivot
             int maxRow = k;
-            for (int i = k + 1; i < numNodes; i++) {
+            for (int i = k + 1; i < kSystemSize; i++) {
                 if (std::abs(LU[i][k]) > std::abs(LU[maxRow][k])) {
                     maxRow = i;
                 }
@@ -418,10 +419,10 @@ private:
             }
             
             // Elimination
-            for (int i = k + 1; i < numNodes; i++) {
+            for (int i = k + 1; i < kSystemSize; i++) {
                 if (std::abs(LU[k][k]) > 1e-12) {
                     LU[i][k] /= LU[k][k];
-                    for (int j = k + 1; j < numNodes; j++) {
+                    for (int j = k + 1; j < kSystemSize; j++) {
                         LU[i][j] -= LU[i][k] * LU[k][j];
                     }
                 }
@@ -432,14 +433,14 @@ private:
     void solveLU() {
         // Add capacitor current contribution to RHS
         std::vector<double> rhs = b;
-        for (int i = 0; i < numNodes; i++) {
-            for (int j = 0; j < numNodes; j++) {
+        for (int i = 0; i < kSystemSize; i++) {
+            for (int j = 0; j < kSystemSize; j++) {
                 rhs[i] += C[i][j] * x_prev[j] / dt;
             }
         }
         
         // Forward substitution
-        for (int i = 0; i < numNodes; i++) {
+        for (int i = 0; i < kSystemSize; i++) {
             x[i] = rhs[pivot[i]];
             for (int j = 0; j < i; j++) {
                 x[i] -= LU[i][j] * x[j];
@@ -447,8 +448,8 @@ private:
         }
         
         // Back substitution
-        for (int i = numNodes - 1; i >= 0; i--) {
-            for (int j = i + 1; j < numNodes; j++) {
+        for (int i = kSystemSize - 1; i >= 0; i--) {
+            for (int j = i + 1; j < kSystemSize; j++) {
                 x[i] -= LU[i][j] * x[j];
             }
             if (std::abs(LU[i][i]) > 1e-12) {
@@ -456,72 +457,108 @@ private:
             }
         }
     }
-    
-    bool updateTubeStages(double tolerance) {
-        bool converged = true;
-        
-        for (auto& tube : tubes) {
-            double va = x[tube.anode];
-            double vg = x[tube.grid];
-            double vc = x[tube.cathode];
-            
-            // 12AX7 triode model equations
-            double vgk = vg - vc;
-            double vak = va - vc;
-            
-            // Grid current (diode model for grid conduction)
-            double ig = 0.0;
-            if (vgk > 0.7) {
-                ig = (vgk - 0.7) / tubeParams.RGI;
+
+    void solve() {
+        std::vector<std::vector<double>> A;
+        A.assign(kSystemSize, std::vector<double>(kSystemSize, 0.0));
+
+        for (int i = 0; i < kSystemSize; ++i)
+            for (int j = 0; j < kSystemSize; ++j)
+                A[i][j] = G[i][j] + C[i][j] / dt;
+
+        std::vector<double> y = b;
+        std::vector<double> x_out(kSystemSize);
+
+        for (int k = 0; k < kSystemSize; ++k) {
+            double pivot = A[k][k];
+            if (std::fabs(pivot) <= 1e-12) continue;
+            for (int i = k + 1; i < kSystemSize; ++i) {
+                double factor = A[i][k] / pivot;
+                for (int j = k; j < kSystemSize; ++j)
+                    A[i][j] -= factor * A[k][j];
+                y[i] -= factor * y[k];
             }
-            
-            // Plate current using Koren model
-            double E1 = vak / tubeParams.KP * std::log(1.0 + std::exp(tubeParams.KP * 
-                (1.0 / tubeParams.MU + vgk / std::sqrt(tubeParams.KVB + vak * vak))));
-            
-            double ia = 0.0;
-            if (E1 > 0) {
-                ia = std::pow(E1, tubeParams.EX) / tubeParams.KG1;
-            }
-            
-            // Check convergence
-            if (std::abs(ia - tube.ia_prev) > tolerance) {
-                converged = false;
-            }
-            
-            // Update nonlinear stamps
-            updateTubeStamp(tube, ia, ig);
-            
-            // Store for next iteration
-            tube.va_prev = va;
-            tube.vg_prev = vg;
-            tube.vc_prev = vc;
-            tube.ia_prev = ia;
         }
-        
-        return converged;
+
+        for (int i = kSystemSize - 1; i >= 0; --i) {
+            double sum = y[i];
+            for (int j = i + 1; j < kSystemSize; ++j)
+                sum -= A[i][j] * x_out[j];
+            x_out[i] = sum / A[i][i];
+        }
+
+        x = x_out;
     }
-    
-    void updateTubeStamp(const TubeStage& tube, double ia, double ig) {
-        // Norton equivalent: current source + conductance
-        // Simplified linearization around operating point
-        double gm = 1e-3; // Simplified transconductance
-        double rp = 100e3; // Simplified plate resistance
-        
-        // Stamp current sources
-        if (tube.anode != 0) b[tube.anode] -= ia;
-        if (tube.cathode != 0) b[tube.cathode] += ia;
-        if (tube.grid != 0) b[tube.grid] -= ig;
-        
-        // Stamp linearized conductances (simplified)
-        double gp = 1.0 / rp;
-        if (tube.anode != 0) {
-            G[tube.anode][tube.anode] += gp;
-            if (tube.cathode != 0) G[tube.anode][tube.cathode] -= gp;
+
+    void newtonRaphsonSolve() {
+        constexpr int kMaxNRIterations = 20;
+        constexpr double kTolerance = 1e-6;
+
+        std::vector<double> x_guess = x;
+
+        for (int iter = 0; iter < kMaxNRIterations; ++iter) {
+            std::vector<std::vector<double>> G_backup = G;
+            std::vector<double> b_backup = b;
+
+            for (const auto& triode : tubes) {
+                double Vak = x_guess[triode.anode] - x_guess[triode.cathode];
+                double Vgk = x_guess[triode.grid] - x_guess[triode.cathode];
+                double I = triodeCurrent(Vak, Vgk);
+
+                double dVak = 1e-3;
+                double dVgk = 1e-3;
+                double dIa_dVak = (triodeCurrent(Vak + dVak, Vgk) - I) / dVak;
+                double dIa_dVgk = (triodeCurrent(Vak, Vgk + dVgk) - I) / dVgk;
+
+                if (triode.anode != 0) G[triode.anode][triode.anode] += dIa_dVak;
+                if (triode.anode != 0 && triode.cathode != 0) {
+                    G[triode.anode][triode.cathode] -= dIa_dVak + dIa_dVgk;
+                    G[triode.cathode][triode.anode] -= dIa_dVak;
+                    G[triode.cathode][triode.cathode] += dIa_dVak + dIa_dVgk;
+                }
+                if (triode.grid != 0 && triode.cathode != 0) {
+                    G[triode.grid][triode.cathode] -= dIa_dVgk;
+                    G[triode.cathode][triode.grid] -= dIa_dVgk;
+                    G[triode.grid][triode.grid] += dIa_dVgk;
+                }
+
+                if (triode.anode != 0) b[triode.anode] -= I;
+                if (triode.cathode != 0) b[triode.cathode] += I;
+            }
+
+            updateSystemMatrix();
+            solveLU();
+            // solve();
+
+            double maxDelta = 0.0;
+            for (int i = 0; i < kSystemSize; ++i) {
+                double delta = std::fabs(x[i] - x_guess[i]);
+                maxDelta = std::max(maxDelta, delta);
+                x_guess[i] = x[i];
+            }
+
+            if (maxDelta < kTolerance) break;
+
+            G = G_backup;
+            b = b_backup;
         }
-        if (tube.cathode != 0) {
-            G[tube.cathode][tube.cathode] += gp;
-            if (tube.anode != 0) G[tube.cathode][tube.anode] -= gp;
-        }
+    }
+
+    [[nodiscard]] static double triodeCurrent(double Vak, double Vgk) {
+        constexpr double MU = 96.2;
+        constexpr double EX = 1.437;
+        constexpr double KG1 = 613.4;
+        constexpr double KP = 740.3;
+        constexpr double KVB = 1672.0;
+
+        double E1 = Vak / KP * std::log1p(std::exp(KP * (1.0 / MU + Vgk / std::sqrt(KVB + Vak * Vak))));
+
+        // Clamp E1 to prevent overflow
+        E1 = std::max(0.0, std::min(E1, 10.0));
+
+        double I = 0.5 * (std::pow(E1, EX) + std::pow(std::abs(E1), EX)) / KG1;
+
+        // Realistic current limiting
+        return std::max(0.0, std::min(I, 0.01)); // Max 10mA
     }
 };
