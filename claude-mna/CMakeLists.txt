@@ -5,4 +5,5 @@ set(CMAKE_CXX_STANDARD 20)
 
 add_executable(mkiicp
         mkiicp.hpp
-        main.cpp)
+        main.cpp
+        PreampSimulator.h)
