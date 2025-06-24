@@ -164,7 +164,9 @@ public:
         }
         m_x = m_x_prev;
 
-        for (int i=0; i<m_nr_max_iter; ++i) {
+        int iter;
+        double norm_min = 1e6;
+        for (iter=0; iter<m_nr_max_iter; ++iter) {
             Matrix J = m_G_dynamic;
             for(int r=0; r<m_num_nodes; ++r) for(int c=0; c<m_num_nodes; ++c) J[r][c] += m_C_mat[r][c] / m_dt;
             Vector Gx = matrix_vector_mult(m_G_dynamic, m_x);
@@ -180,6 +182,10 @@ public:
             if (max_s > m_nr_damping) damp = m_nr_damping / max_s;
             double norm = 0.0; for (int j=0; j<m_num_nodes; ++j) { double s = damp*dx[j]; m_x[j]+=s; norm+=s*s; }
             if (sqrt(norm) < m_nr_tolerance) break;
+            if (norm < norm_min) norm_min = norm;
+        }
+        if (iter >= m_nr_max_iter) {
+            std::cerr << "too many iterations; norm=" << sqrt(norm_min) << std::endl;
         }
         m_x_prev = m_x;
 
@@ -213,7 +219,7 @@ public:
     int m_output_node = -1;
 
     double m_sample_rate, m_dt;
-    const int m_nr_max_iter = 15, m_nr_damping = 1.0;
+    const int m_nr_max_iter = 50, m_nr_damping = 1.0;
     const double m_nr_tolerance = 1e-6, G_LARGE = 1e12;
 
     void update_dynamic_components() {
