@@ -223,7 +223,7 @@ int main(int argc, char *argv[]) {
     // Set controls for IIC+:
     sim.set_parameter("volume1", 0.68556546); // hard-coded from Mark V IIC+ mode (470kOhm)
     sim.set_parameter("lead_drive", 0.70710678);
-    sim.set_parameter("treble", 0.89);
+    sim.set_parameter("treble", 0.89442719);
     sim.set_parameter("mid", 0.57445626);
     sim.set_parameter("bass", 0.2236068);
     sim.set_parameter("lead_master", 0.90111043);
