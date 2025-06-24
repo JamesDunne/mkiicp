@@ -117,6 +117,10 @@ public:
         }
     }
 
+    void set_output_node(const std::string& name) {
+        m_output_node = m_node(name);
+    }
+
     void prepare_to_play() {
         if (m_is_prepared) return;
         m_G_static.assign(m_num_nodes, Vector(m_num_nodes, 0.0));
@@ -165,7 +169,12 @@ public:
             if (sqrt(norm) < m_nr_tolerance) break;
         }
         m_x_prev = m_x;
-        return m_x.back();
+
+        if (m_output_node < 0) {
+            m_output_node = m_x.size() - 1;
+        }
+        double output_sample = m_x.at(m_output_node);
+        return output_sample;
     }
 
 private:
@@ -190,6 +199,8 @@ private:
     bool m_is_prepared = false;
     bool m_params_dirty = true;
 
+    int m_output_node = -1;
+
     double m_sample_rate, m_dt;
     const int m_nr_max_iter = 15, m_nr_damping = 1.0;
     const double m_nr_tolerance = 1e-6, G_LARGE = 1e12;
@@ -200,8 +211,8 @@ private:
             const auto& p = pair.second;
             double w = p.value;
             if (p.taper == 'A' || p.taper == 'a') w = w * w; // Audio taper approximation
-            double r1 = p.R_total * w;
-            double r2 = p.R_total * (1.0 - w);
+            double r1 = p.R_total * (1.0 - w);
+            double r2 = p.R_total * (w);
             stamp_resistor(m_G_dynamic, p.n1, p.wiper, r1);
             stamp_resistor(m_G_dynamic, p.wiper, p.n2, r2);
         }
@@ -209,7 +220,7 @@ private:
             const auto& vr = pair.second;
             double w = vr.value;
             if (vr.taper == 'A' || vr.taper == 'a') w = w * w;
-            stamp_resistor(m_G_dynamic, vr.n1, vr.n2, vr.R_max * w);
+            stamp_resistor(m_G_dynamic, vr.n1, vr.n2, vr.R_max * (1.0 - w));
         }
         m_params_dirty = false;
     }

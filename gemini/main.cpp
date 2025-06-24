@@ -90,7 +90,7 @@ void setup_markiicp(RealtimeTubeSim& sim) {
     sim.add_capacitor("N018", "N017", 0.022e-6); // C25
 
     // input:
-    sim.add_voltage_source("N019", "0", 1.0, true);  // Vin
+    sim.add_voltage_source("N019", "0", 0.0, true);  // Vin
 
     // Voltage sources (DC bias)
     sim.add_voltage_source("N003", "0", 405, false); // VE
@@ -98,12 +98,14 @@ void setup_markiicp(RealtimeTubeSim& sim) {
     sim.add_voltage_source("N006", "0", 410, false); // VC2
 
     // tone stack:
-    sim.add_potentiometer("treble", "N005", "N007", "N016", 250e3, 'A');
+    sim.add_potentiometer("treble", "N005", "N016", "N007", 250e3, 'A');
     sim.add_variable_resistor("bass", "N016", "0", 250e3, 'A');
     sim.add_variable_resistor("mid", "N024", "0", 10e3, 'A');
 
     // volume1:
-    sim.add_potentiometer("volume1", "N008", "N020", "0", 1e6, 'A');
+    sim.add_potentiometer("volume1", "N008", "0", "N020", 1e6, 'A');
+    // lead_drive:
+    sim.add_potentiometer("lead_drive", "N025", "0", "N029", 1e6, 'A');
     // lead_master:
     sim.add_variable_resistor("lead_master", "N022", "0", 250e3, 'A');
 
@@ -135,6 +137,9 @@ void setup_markiicp(RealtimeTubeSim& sim) {
 
     // XV2A: 12AX7 N012 N023 N031
     sim.add_triode("N012", "N023", "N031");
+
+    // capture output from N014 after master volume:
+    sim.set_output_node("N014");
 }
 
 void setup_basic_tube_preamp(RealtimeTubeSim& sim) {
@@ -219,11 +224,12 @@ int main(int argc, char *argv[]) {
 
     // Set controls for IIC+:
     sim.set_parameter("volume1", 0.75);
+    sim.set_parameter("lead_drive", 0.75);
     sim.set_parameter("treble", 0.8);
     sim.set_parameter("mid", 0.33);
-    sim.set_parameter("bass", 0.05);
+    sim.set_parameter("bass", 0.125);
     sim.set_parameter("lead_master", 0.75);
-    sim.set_parameter("master", 0.5);
+    sim.set_parameter("master", 0.333);
 
     //simulate_sine_sweep(sim, sampleRate);
 
