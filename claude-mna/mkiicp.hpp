@@ -5,9 +5,7 @@
 #include <string>
 #include <cmath>
 #include <algorithm>
-#include <iostream>
 #include <memory>
-#include <ostream>
 
 class MKIICSimulator {
 private:
@@ -24,14 +22,21 @@ private:
     // Node mapping from SPICE netlist
     std::map<std::string, int> nodeMap;
     int numNodes;
-    
+
     // MNA matrices
     std::vector<std::vector<double>> G; // Conductance matrix
     std::vector<std::vector<double>> C; // Capacitance matrix
     std::vector<double> b;              // Current source vector
     std::vector<double> x;              // Solution vector (node voltages)
     std::vector<double> x_prev;         // Previous solution for integration
-    
+
+    // Track variable resistor stamps for removal
+    struct ResistorStamp {
+        int node1, node2;
+        double conductance;
+    };
+    std::map<std::string, ResistorStamp> variableResistors;
+
     // Tube model parameters (12AX7)
     struct TubeParams {
         double MU = 96.20;
@@ -41,35 +46,29 @@ private:
         double KVB = 1672.0;
         double RGI = 2000.0;
     } tubeParams;
-    
+
     // Tube instances
     struct TubeStage {
         int anode, grid, cathode;
         double va_prev = 0, vg_prev = 0, vc_prev = 0;
         double ia_prev = 0;
     };
-    
+
     std::vector<TubeStage> tubes;
-    
+
     // Sample rate and time step
     double sampleRate = 48000.0;
     double dt;
-    
+
     // LU decomposition storage
     std::vector<std::vector<double>> LU;
     std::vector<int> pivot;
-    
+
 public:
     MKIICSimulator(double fs = 48000.0) : sampleRate(fs), dt(1.0/fs) {
         initializeCircuit();
     }
-    
-    void setSampleRate(double fs) {
-        sampleRate = fs;
-        dt = 1.0 / fs;
-        updateCapacitorStamps();
-    }
-    
+
     // Parameter control methods
     void setVolume1(double vol) { params.vol1 = std::clamp(vol, 0.0, 1.0); updateToneStack(); }
     void setTreble(double treble) { params.treble = std::clamp(treble, 0.0, 1.0); updateToneStack(); }
@@ -77,39 +76,39 @@ public:
     void setBass(double bass) { params.bass = std::clamp(bass, 0.0, 1.0); updateToneStack(); }
     void setGain(double gain) { params.gain = std::clamp(gain, 0.0, 1.0); updateGainControl(); }
     void setMaster(double master) { params.master = std::clamp(master, 0.0, 1.0); updateMasterControl(); }
-    
+
     // Main processing function
     double processSample(double input) {
         // Set input voltage source
         int inputNode = nodeMap["N019"];
         b[inputNode] = input;
-        
+
         // Newton-Raphson iteration for nonlinear elements (tubes)
         const int maxIterations = 5;
         const double tolerance = 1e-6;
-        
+
         for (int iter = 0; iter < maxIterations; iter++) {
             // Solve linear system Ax = b
             solveLU();
-            
+
             // Update tube nonlinearities
             bool converged = updateTubeStages(tolerance);
             if (converged) break;
         }
-        
+
         // Store previous solution for next time step
         x_prev = x;
-        
+
         // Extract output (scaled by 1/1400 as in SPICE)
         int outputNode = nodeMap["N014"];
         return x[outputNode] / 1400.0;
     }
-    
+
 private:
     void initializeCircuit() {
         // Initialize node mapping (0 = ground)
         nodeMap["0"] = 0;
-        
+
         // Add all nodes from the netlist
         std::vector<std::string> nodes = {
             "N001", "N002", "N003", "N004", "N005", "N006", "N007", "N008", "N009", "N010",
@@ -117,34 +116,39 @@ private:
             "N021", "N022", "N023", "N024", "N025", "N026", "N027", "N028", "N029", "N030",
             "N031", "N032", "N033", "N034", "N035", "N036", "P001"
         };
-        
+
         for (size_t i = 0; i < nodes.size(); i++) {
             nodeMap[nodes[i]] = i + 1;
         }
-        
+
         numNodes = nodes.size() + 1; // +1 for ground
-        
+
         // Initialize matrices
         G.assign(numNodes, std::vector<double>(numNodes, 0.0));
         C.assign(numNodes, std::vector<double>(numNodes, 0.0));
         b.assign(numNodes, 0.0);
         x.assign(numNodes, 0.0);
         x_prev.assign(numNodes, 0.0);
-        
+
         // Initialize LU decomposition storage
         LU.assign(numNodes, std::vector<double>(numNodes, 0.0));
         pivot.assign(numNodes, 0);
-        
+
         // Stamp passive components
         stampPassiveComponents();
-        
+
+        // Initialize tone stack and gain controls
+        updateToneStack();
+        updateGainControl();
+        updateMasterControl();
+
         // Initialize tube stages
         initializeTubeStages();
-        
+
         // Perform initial LU decomposition
         updateSystemMatrix();
     }
-    
+
     void stampPassiveComponents() {
         // Resistors - stamp conductances
         stampResistor("N004", "N015", 100e3);     // R5
@@ -173,14 +177,13 @@ private:
         stampResistor("N022", "N032", 150e3);     // R102
         stampResistor("N032", "0", 4.7e3);        // R101
         stampResistor("N006", "N012", 120e3);     // R19
-        stampResistor("N006", "0", 410e3);        // VC2 equivalent
         stampResistor("N023", "0", 47e3);         // R103
         stampResistor("N031", "0", 1e3);          // R104
         stampResistor("N023", "N032", 2.2e3);     // R12
         stampResistor("N014", "N013", 15e3);      // R106
         stampResistor("N005", "N005", 10e6);      // R6
         stampResistor("N002", "0", 100e3);        // R32
-        
+
         // Capacitors
         stampCapacitor("N005", "N004", 750e-12);  // C6
         stampCapacitor("N005", "N004", 250e-12);  // C5 (parallel with C6)
@@ -206,22 +209,18 @@ private:
         stampCapacitor("N001", "N011", 0.02e-6);  // C21
         stampCapacitor("N002", "0", 500e-12);     // C32
         stampCapacitor("N018", "N017", 0.022e-6); // C25
-        
+
         // Voltage sources (DC bias)
         stampVoltageSource("N003", "0", 405);     // VE
         stampVoltageSource("N010", "0", 410);     // VC
-        
-        // Tone stack and gain controls (initial values)
-        updateToneStack();
-        updateGainControl();
-        updateMasterControl();
+        stampVoltageSource("N006", "0", 410);     // VC2
     }
-    
+
     void stampResistor(const std::string& n1, const std::string& n2, double R) {
         int node1 = nodeMap[n1];
         int node2 = nodeMap[n2];
         double g = 1.0 / R;
-        
+
         if (node1 != 0) {
             G[node1][node1] += g;
             if (node2 != 0) G[node1][node2] -= g;
@@ -231,11 +230,11 @@ private:
             if (node1 != 0) G[node2][node1] -= g;
         }
     }
-    
+
     void stampCapacitor(const std::string& n1, const std::string& n2, double Cap) {
         int node1 = nodeMap[n1];
         int node2 = nodeMap[n2];
-        
+
         if (node1 != 0) {
             C[node1][node1] += Cap;
             if (node2 != 0) C[node1][node2] -= Cap;
@@ -245,11 +244,55 @@ private:
             if (node1 != 0) C[node2][node1] -= Cap;
         }
     }
-    
+
+    void stampVariableResistor(const std::string& name, const std::string& n1, const std::string& n2, double R) {
+        // Remove previous stamp if it exists
+        removeVariableResistor(name);
+
+        // Stamp new resistor
+        int node1 = nodeMap[n1];
+        int node2 = nodeMap[n2];
+        double g = (R > 1e-12) ? 1.0 / R : 0.0; // Avoid division by zero
+
+        if (node1 != 0) {
+            G[node1][node1] += g;
+            if (node2 != 0) G[node1][node2] -= g;
+        }
+        if (node2 != 0) {
+            G[node2][node2] += g;
+            if (node1 != 0) G[node2][node1] -= g;
+        }
+
+        // Store the stamp for later removal
+        variableResistors[name] = {node1, node2, g};
+    }
+
+    void removeVariableResistor(const std::string& name) {
+        auto it = variableResistors.find(name);
+        if (it != variableResistors.end()) {
+            const ResistorStamp& stamp = it->second;
+            int node1 = stamp.node1;
+            int node2 = stamp.node2;
+            double g = stamp.conductance;
+
+            // Remove the stamp by subtracting it
+            if (node1 != 0) {
+                G[node1][node1] -= g;
+                if (node2 != 0) G[node1][node2] += g;
+            }
+            if (node2 != 0) {
+                G[node2][node2] -= g;
+                if (node1 != 0) G[node2][node1] += g;
+            }
+
+            variableResistors.erase(it);
+        }
+    }
+
     void stampVoltageSource(const std::string& nPos, const std::string& nNeg, double voltage) {
         int pos = nodeMap[nPos];
         int neg = nodeMap[nNeg];
-        
+
         // Simple voltage source implementation - add large conductance
         double largeG = 1e6;
         if (pos != 0) {
@@ -261,58 +304,57 @@ private:
             b[neg] -= largeG * voltage;
         }
     }
-    
+
     void updateToneStack() {
-        // Clear previous tone stack stamps
-        clearResistorRange("RA_VOLUME1", "RC_VOLUME1");
-        clearResistorRange("RA_TREBLE", "RC_TREBLE");
-        clearResistorRange("RA_BASS", "RC_BASS");
-        clearResistorRange("RA_MID", "RC_MID");
-        
-        // Volume control
+        // Volume control - potentiometer between N020 and N008
         double vol1 = params.vol1;
-        stampResistor("N020", "N008", 1e6 * (1 - vol1));  // RA_VOLUME1
-        stampResistor("0", "N020", 1e6 * vol1);           // RC_VOLUME1
-        
-        // Treble control
+        if (vol1 < 1e-6) vol1 = 1e-6; // Prevent zero resistance
+        if (vol1 > 1.0 - 1e-6) vol1 = 1.0 - 1e-6;
+
+        stampVariableResistor("RA_VOLUME1", "N020", "N008", 1e6 * (1 - vol1));
+        stampVariableResistor("RC_VOLUME1", "0", "N020", 1e6 * vol1);
+
+        // Treble control - potentiometer between N005 and N016 via N007
         double treble = params.treble;
-        stampResistor("N005", "N007", 250e3 * (1 - treble)); // RA_TREBLE
-        stampResistor("N007", "N016", 250e3 * treble);        // RC_TREBLE
-        
-        // Bass control
+        if (treble < 1e-6) treble = 1e-6;
+        if (treble > 1.0 - 1e-6) treble = 1.0 - 1e-6;
+
+        stampVariableResistor("RA_TREBLE", "N005", "N007", 250e3 * (1 - treble));
+        stampVariableResistor("RC_TREBLE", "N007", "N016", 250e3 * treble);
+
+        // Bass control - potentiometer between N016 and N024
         double bass = params.bass;
-        stampResistor("N016", "N024", 250e3 * (1 - bass)); // RA_BASS
-        stampResistor("N024", "N024", 250e3 * bass);        // RC_BASS
-        
-        // Mid control
+        if (bass < 1e-6) bass = 1e-6;
+        if (bass > 1.0 - 1e-6) bass = 1.0 - 1e-6;
+
+        stampVariableResistor("RA_BASS", "N016", "N024", 250e3 * (1 - bass));
+        stampVariableResistor("RC_BASS", "N024", "0", 250e3 * bass); // Fixed: was N024 to N024
+
+        // Mid control - potentiometer from N024 to ground
         double mid = params.mid;
-        stampResistor("N024", "0", 10e3 * (1 - mid)); // RA_MID
-        stampResistor("0", "0", 10e3 * mid);           // RC_MID
+        if (mid < 1e-6) mid = 1e-6;
+        if (mid > 1.0 - 1e-6) mid = 1.0 - 1e-6;
+
+        stampVariableResistor("RA_MID", "N024", "0", 10e3 * (1 - mid));
+        // Note: RC_MID connects 0 to 0 which is meaningless, so we skip it
     }
-    
+
     void updateGainControl() {
-        clearResistorRange("RA_GAIN", "RC_GAIN");
-        
         double gain = params.gain;
-        stampResistor("N025", "N029", 1e6 * (1 - gain)); // RA_GAIN
-        stampResistor("N029", "0", 1e6 * gain);          // RC_GAIN
+        if (gain < 1e-6) gain = 1e-6;
+        if (gain > 1.0 - 1e-6) gain = 1.0 - 1e-6;
+
+        stampVariableResistor("RA_GAIN", "N025", "N029", 1e6 * (1 - gain));
+        stampVariableResistor("RC_GAIN", "N029", "0", 1e6 * gain);
     }
-    
+
     void updateMasterControl() {
-        clearResistorRange("RA_MASTER", "RC_MASTER");
-        
         double master = params.master;
-        stampResistor("N014", "0", 1e6 * (1 - master)); // RA_MASTER
-        stampResistor("0", "0", 1e6 * master);          // RC_MASTER
-    }
-    
-    void clearResistorRange(const std::string& start, const std::string& end) {
-        // Simple implementation - just rebuild the entire G matrix
-        // In practice, you'd want to track and remove specific stamps
-        for (auto& row : G) {
-            std::fill(row.begin(), row.end(), 0.0);
-        }
-        stampPassiveComponents();
+        if (master < 1e-6) master = 1e-6;
+        if (master > 1.0 - 1e-6) master = 1.0 - 1e-6;
+
+        stampVariableResistor("RA_MASTER", "N014", "0", 1e6 * (1 - master));
+        // Note: RC_MASTER connects 0 to 0 which is meaningless, so we skip it
     }
     
     void initializeTubeStages() {
@@ -483,38 +525,3 @@ private:
         }
     }
 };
-
-int main(int argc, char *argv[]) {
-    const double sampleRate = 48000.0;
-    MKIICSimulator sim { sampleRate };
-
-    double startFreq = 20.0f;        // Start frequency in Hz
-    double endFreq = 20000.0f;       // End frequency in Hz
-    double duration = 5.0f;          // Sweep duration in seconds
-
-    double k = (endFreq / startFreq);
-    // float L = duration / std::log(k);
-
-    double phase = 0.0;
-    for (long i = 0; i < 48000 * 5; ++i) {
-        double t = static_cast<double>(i) / sampleRate;
-        double instantaneousFreq = startFreq * std::pow(k, t / duration);
-
-        // Calculate phase increment for this sample
-        double phaseIncrement = 2.0f * static_cast<double>(M_PI) * instantaneousFreq / sampleRate;
-
-        // Add to accumulated phase and generate sample
-        phase += phaseIncrement;
-        double x = std::sin(phase);
-
-        // process sample with first gain stage and tone stack:
-        x = sim.processSample(x);
-
-        std::cout
-            << t << ","
-            << x
-            << std::endl;
-    }
-
-    return 0;
-}

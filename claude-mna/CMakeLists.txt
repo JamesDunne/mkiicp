@@ -4,5 +4,5 @@ project(mkiicp)
 set(CMAKE_CXX_STANDARD 20)
 
 add_executable(mkiicp
-        claude_main.cpp
-        claude_main.cpp)
+        mkiicp.hpp
+        main.cpp)
