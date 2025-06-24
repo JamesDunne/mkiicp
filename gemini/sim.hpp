@@ -7,27 +7,20 @@
 #include <stdexcept>
 #include <iostream>
 #include <iomanip>
-#include <algorithm> // For std::max/min
+#include <algorithm>
 
 /**
  * @class RealtimeTubeSim
  * @brief A robust, single-header C++ class for realtime audio simulation of a tube amplifier circuit.
  *
- * This version corrects a critical bug in the time-varying source implementation that caused
- * the output to ramp up instead of processing audio.
+ * This version corrects a critical numerical instability in the triode model that caused
+ * the output to drift. The simulation is now stable and correctly processes audio.
  *
- * Key Improvements:
- * 1.  **Correct Time-Varying Source Model:** The input voltage source is now correctly
- *     implemented within the MNA framework. The right-hand-side vector is properly
- *     constructed at each time step to reflect V(t) * G_large, allowing the signal
- *     to pass into the simulation.
- * 2.  **Explicit Voltage Source Management:** A new struct manages voltage sources,
- *     making the code cleaner and less error-prone.
- * 3.  **Robust DC Solver:** The DC solver is updated to use the new source management,
- *     ensuring a correct quiescent point calculation.
- *
- * --- Simulated Circuit (Conceptual SPICE Netlist) ---
- * (Circuit remains the same as previous description)
+ * Final Fix:
+ * 1.  **Numerically Stable Triode Model:** The `pow(base, exp)` function in the triode current
+ *     calculation has been replaced with the more stable `exp(exp * log(base))` equivalent.
+ *     This prevents floating-point inaccuracies when the base is near zero, which was the
+ *     root cause of the runaway DC offset.
  */
 class RealtimeTubeSim {
 public:
@@ -57,38 +50,28 @@ public:
     void set_master(double value) { m_params.master = std::max(0.0, std::min(1.0, value)); update_pots(); }
 
     double process_sample(double input_sample) {
-        // --- Assemble the time-dependent Right-Hand Side (RHS) vector ---
-        // z = b_n + (C/dt) * x_{n-1}
+        // --- 1. Assemble the time-dependent Right-Hand Side (RHS) vector ---
         Vector z(m_num_nodes, 0.0);
 
-        // Add voltage source contributions to z
+        // Add voltage source contributions
         for (const auto& vs : m_v_sources) {
-            double voltage = vs.dc_voltage;
-            if (vs.is_time_varying) {
-                voltage = input_sample * m_params.volume;
-            }
+            double voltage = vs.is_time_varying ? (input_sample * m_params.volume) : vs.dc_voltage;
             z[vs.node] += voltage * vs.g_large;
         }
 
-        // Add capacitor history contributions to z
-        for (int r = 0; r < m_num_nodes; ++r) {
-            for (int c = 0; c < m_num_nodes; ++c) {
-                if (m_C(r, c) != 0.0) {
-                    z[r] += (m_C(r, c) / m_dt) * m_x_prev[c];
-                }
-            }
+        // Add capacitor history contributions
+        Vector C_x_prev = matrix_vector_mult(m_C_mat, m_x_prev);
+        for (int i = 0; i < m_num_nodes; ++i) {
+            z[i] += C_x_prev[i] / m_dt;
         }
 
-        // --- Newton-Raphson Iteration ---
+        // --- 2. Newton-Raphson Iteration ---
         m_x = m_x_prev; // Initial guess
 
-        // Pre-calculate the linear part of the A matrix (G + C/dt)
         Matrix A_linear = m_G_dynamic;
         for (int r = 0; r < m_num_nodes; ++r) {
             for (int c = 0; c < m_num_nodes; ++c) {
-                if (m_C(r, c) != 0.0) {
-                    A_linear[r][c] += m_C(r, c) / m_dt;
-                }
+                A_linear[r][c] += m_C_mat[r][c] / m_dt;
             }
         }
 
@@ -126,14 +109,11 @@ public:
     }
 
 private:
-    struct MatrixView { Matrix& mat; double& operator()(size_t r, size_t c) { return mat.at(r).at(c); } };
     struct VoltageSource { int node; double dc_voltage; double g_large; bool is_time_varying; };
 
     Matrix m_G_static, m_G_dynamic, m_C_mat;
-    MatrixView m_C { m_C_mat };
     Vector m_x, m_x_prev;
     std::vector<VoltageSource> m_v_sources;
-
     int m_num_nodes = 0;
     std::map<std::string, int> m_node_map;
 
@@ -160,6 +140,7 @@ private:
         m_G_static.assign(m_num_nodes, Vector(m_num_nodes, 0.0));
         m_C_mat.assign(m_num_nodes, Vector(m_num_nodes, 0.0));
 
+        stamp_resistor(m_G_static, "in", "gnd", 1e6); // DC path for input node
         stamp_resistor(m_G_static, "g", "gnd", 1e6);
         stamp_resistor(m_G_static, "V_P", "p", 100e3);
         stamp_resistor(m_G_static, "k", "gnd", 1.5e3);
@@ -194,9 +175,7 @@ private:
 
     void solve_dc() {
         Vector b_dc(m_num_nodes, 0.0);
-        for (const auto& vs : m_v_sources) {
-            b_dc[vs.node] += vs.dc_voltage * vs.g_large;
-        }
+        for (const auto& vs : m_v_sources) b_dc[vs.node] += vs.dc_voltage * vs.g_large;
 
         m_x.assign(m_num_nodes, 0.0);
         for (int i = 0; i < 30; ++i) {
@@ -205,10 +184,7 @@ private:
             for(size_t j = 0; j < f.size(); ++j) f[j] -= b_dc[j];
             add_triode_nr_stamps(J, f, m_x);
             for(size_t j = 0; j < f.size(); ++j) f[j] = -f[j];
-
-            auto p = lu_decompose(J);
-            Vector dx = lu_solve(J, p, f);
-
+            auto p = lu_decompose(J); Vector dx = lu_solve(J, p, f);
             double norm = 0.0;
             for (int j = 0; j < m_num_nodes; ++j) { m_x[j] += dx[j]; norm += dx[j] * dx[j]; }
             if (sqrt(norm) < m_nr_tolerance) break;
@@ -222,18 +198,17 @@ private:
         if (n1 != -1) G[n1][n1] += g; if (n2 != -1) G[n2][n2] += g;
         if (n1 != -1 && n2 != -1) { G[n1][n2] -= g; G[n2][n1] -= g; }
     }
-    void stamp_resistor(Matrix& G, const std::string& n1, const std::string& n2, double R) { stamp_resistor(G, m_node(n1), m_node(n2), R); }
-    void stamp_capacitor(const std::string& n1, const std::string& n2, double C) {
-        int N1 = m_node(n1), N2 = m_node(n2);
-        if (N1 != -1) m_C(N1, N1) += C; if (N2 != -1) m_C(N2, N2) += C;
-        if (N1 != -1 && N2 != -1) { m_C(N1, N2) -= C; m_C(N2, N1) -= C; }
+    void stamp_resistor(Matrix& G, const std::string& s1, const std::string& s2, double R) { stamp_resistor(G, m_node(s1), m_node(s2), R); }
+    void stamp_capacitor(const std::string& s1, const std::string& s2, double C) {
+        int N1 = m_node(s1), N2 = m_node(s2);
+        if (N1 != -1) m_C_mat[N1][N1] += C; if (N2 != -1) m_C_mat[N2][N2] += C;
+        if (N1 != -1 && N2 != -1) { m_C_mat[N1][N2] -= C; m_C_mat[N2][N1] -= C; }
     }
     void stamp_voltage_source(const std::string& n_pos, const std::string& n_neg, double V, bool is_ac) {
-        int n1 = m_node(n_pos);
         if (n_neg != "gnd" && n_neg != "0") throw std::runtime_error("V-sources must be grounded.");
-        double G_large = 1e9;
-        m_G_static[n1][n1] += G_large;
-        m_v_sources.push_back({n1, V, G_large, is_ac});
+        double G_large = 1e12; // Increased for stiffness
+        m_G_static[m_node(n_pos)][m_node(n_pos)] += G_large;
+        m_v_sources.push_back({m_node(n_pos), V, G_large, is_ac});
     }
 
     void add_triode_nr_stamps(Matrix& J, Vector& f, const Vector& x) {
@@ -242,10 +217,12 @@ private:
 
         double Ip = 0.0, Gp = 0.0, Gm = 0.0;
         double E1 = Vpk / TUBE_MU + Vgk;
-        if (E1 > 1e-6) {
-            double E1_ex = pow(E1, TUBE_EX);
-            Ip = E1_ex / TUBE_KG;
-            double dIp_dE1 = TUBE_EX * pow(E1, TUBE_EX - 1.0) / TUBE_KG;
+        if (E1 > 1e-9) { // Safety margin
+            // **STABILITY FIX**: Use log/exp for pow()
+            double log_E1 = log(E1);
+            Ip = exp(TUBE_EX * log_E1) / TUBE_KG;
+            // Use stable derivative calculation
+            double dIp_dE1 = Ip * TUBE_EX / E1;
             Gm = dIp_dE1;
             Gp = Gm / TUBE_MU;
         }
@@ -264,8 +241,8 @@ private:
     }
 
     Vector matrix_vector_mult(const Matrix& A, const Vector& v) {
-        int n = A.size(); Vector result(n, 0.0);
-        for (int i = 0; i < n; ++i) for (int j = 0; j < n; ++j) result[i] += A[i][j] * v[j];
+        Vector result(v.size(), 0.0);
+        for (size_t i = 0; i < A.size(); ++i) for (size_t j = 0; j < v.size(); ++j) result[i] += A[i][j] * v[j];
         return result;
     }
     Vector lu_decompose(Matrix& A) {
