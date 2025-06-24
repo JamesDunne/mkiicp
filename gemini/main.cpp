@@ -99,7 +99,7 @@ void setup_markiicp(RealtimeTubeSim& sim) {
 
     // tone stack:
     sim.add_potentiometer("treble", "N005", "N016", "N007", 250e3, 'A');
-    sim.add_variable_resistor("bass", "N016", "0", 250e3, 'A');
+    sim.add_variable_resistor("bass", "N016", "N024", 250e3, 'A');
     sim.add_variable_resistor("mid", "N024", "0", 10e3, 'A');
 
     // volume1:
@@ -220,8 +220,6 @@ int main(int argc, char *argv[]) {
     setup_markiicp(sim);
 #endif
 
-    sim.prepare_to_play();
-
     // Set controls for IIC+:
     sim.set_parameter("volume1", 0.68556546); // hard-coded from Mark V IIC+ mode (470kOhm)
     sim.set_parameter("lead_drive", 0.70710678);
@@ -229,7 +227,9 @@ int main(int argc, char *argv[]) {
     sim.set_parameter("mid", 0.57445626);
     sim.set_parameter("bass", 0.2236068);
     sim.set_parameter("lead_master", 0.90111043);
-    sim.set_parameter("master", 0.5);
+    sim.set_parameter("master", 0.0125);
+
+    sim.prepare_to_play();
 
     //simulate_sine_sweep(sim, sampleRate);
 
