@@ -85,7 +85,14 @@ public:
         if (n_neg != "gnd" && n_neg != "0") throw std::runtime_error("V-sources must be grounded.");
         m_v_sources.push_back({m_node(n_pos), V, is_ac});
     }
-    void add_triode(const std::string& p, const std::string& g, const std::string& k, double mu, double ex, double kg1, double kp, double kvb, double rgi) {
+    void add_triode(const std::string& p, const std::string& g, const std::string& k,
+        double mu = 96.2,
+        double ex = 1.437,
+        double kg1 = 613.4,
+        double kp = 740.3,
+        double kvb = 1672.0,
+        double rgi = 2000.0
+    ) {
         m_triodes.push_back({m_node(p), m_node(g), m_node(k), mu, ex, kg1, kp, kvb, rgi});
     }
     void add_potentiometer(const std::string& name, const std::string& n1, const std::string& n2, const std::string& wiper, double R, char taper) {
