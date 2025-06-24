@@ -190,7 +190,7 @@ void simulate_sine_sweep(RealtimeTubeSim& sim, const double sampleRate) {
         double instantaneousFreq = startFreq * std::pow(k, t / duration);
 
         // Calculate phase increment for this sample
-        double phaseIncrement = 2.0f * M_PI * instantaneousFreq / sampleRate;
+        double phaseIncrement = 2.0 * M_PI * instantaneousFreq / sampleRate;
 
         // Add to accumulated phase and generate sample
         phase += phaseIncrement;
@@ -223,13 +223,13 @@ int main(int argc, char *argv[]) {
     sim.prepare_to_play();
 
     // Set controls for IIC+:
-    sim.set_parameter("volume1", 0.75);
-    sim.set_parameter("lead_drive", 0.75);
-    sim.set_parameter("treble", 0.8);
-    sim.set_parameter("mid", 0.33);
-    sim.set_parameter("bass", 0.125);
-    sim.set_parameter("lead_master", 0.75);
-    sim.set_parameter("master", 0.333);
+    sim.set_parameter("volume1", 0.68556546); // hard-coded from Mark V IIC+ mode (470kOhm)
+    sim.set_parameter("lead_drive", 0.70710678);
+    sim.set_parameter("treble", 0.89);
+    sim.set_parameter("mid", 0.57445626);
+    sim.set_parameter("bass", 0.2236068);
+    sim.set_parameter("lead_master", 0.90111043);
+    sim.set_parameter("master", 0.5);
 
     //simulate_sine_sweep(sim, sampleRate);
 
@@ -249,13 +249,26 @@ int main(int argc, char *argv[]) {
             return std::max(-1.0, std::min(1.0, boosted_sample)); // Clip to [-1, 1]
         };
 
+        double minV = 1.0;
+        double maxV = -0.0;
         auto ampsim_process = [&](double sample) -> double {
-            return sim.process_sample(sample);
+            double out = sim.process_sample(sample) / 200.0;
+            if (out > maxV) {
+                maxV = out;
+                std::cout << "min=" << minV << " max=" << maxV << std::endl;
+            }
+            if (out < minV) {
+                minV = out;
+                std::cout << "min=" << minV << " max=" << maxV << std::endl;
+            }
+            return out;
         };
 
         // Call the reusable processing function with the desired effect.
         // Change 'volume_reducer' to 'simple_distortion' to apply a different effect.
         processWavFile(input_filename, output_filename, ampsim_process);
+
+        std::cout << "min=" << minV << " max=" << maxV << std::endl;
 
         std::cout << "Successfully processed " << input_filename << " to " << output_filename << std::endl;
 

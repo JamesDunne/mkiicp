@@ -131,7 +131,12 @@ public:
         for(const auto& r : m_resistors) stamp_resistor(m_G_static, r.n1, r.n2, r.R);
         for(const auto& c : m_capacitors) stamp_capacitor(c.n1, c.n2, c.C);
         for(const auto& vs : m_v_sources) m_G_static[vs.node][vs.node] += G_LARGE;
-        for (const auto& t : m_triodes) stamp_resistor(m_G_static, t.p_node, t.k_node, 1e9);
+        for(const auto& t : m_triodes) stamp_resistor(m_G_static, t.p_node, t.k_node, 1e9);
+
+        // select output_node if not already:
+        if (m_output_node < 0) {
+            m_output_node = m_x.size() - 1;
+        }
 
         m_params_dirty = true; // Force initial calculation
         update_dynamic_components(); // Initial stamp of pots
@@ -170,9 +175,6 @@ public:
         }
         m_x_prev = m_x;
 
-        if (m_output_node < 0) {
-            m_output_node = m_x.size() - 1;
-        }
         double output_sample = m_x.at(m_output_node);
         return output_sample;
     }
@@ -209,7 +211,7 @@ private:
         m_G_dynamic = m_G_static;
         for (const auto& pair : m_potentiometers) {
             const auto& p = pair.second;
-            double w = p.value;
+            double w = std::clamp(p.value, 0.01, 0.99);
             if (p.taper == 'A' || p.taper == 'a') w = w * w; // Audio taper approximation
             double r1 = p.R_total * (1.0 - w);
             double r2 = p.R_total * (w);
@@ -218,7 +220,7 @@ private:
         }
         for (const auto& pair : m_variable_resistors) {
             const auto& vr = pair.second;
-            double w = vr.value;
+            double w = std::clamp(vr.value, 0.01, 0.99);
             if (vr.taper == 'A' || vr.taper == 'a') w = w * w;
             stamp_resistor(m_G_dynamic, vr.n1, vr.n2, vr.R_max * (1.0 - w));
         }
