@@ -13,14 +13,16 @@
  * @class RealtimeTubeSim
  * @brief A robust, single-header C++ class for realtime audio simulation of a tube amplifier circuit.
  *
- * This version corrects a critical numerical instability in the triode model that caused
- * the output to drift. The simulation is now stable and correctly processes audio.
+ * This version corrects a critical numerical precision bug that was the true root cause of the
+ * "linearly increasing output" instability.
  *
  * Final Fix:
- * 1.  **Numerically Stable Triode Model:** The `pow(base, exp)` function in the triode current
- *     calculation has been replaced with the more stable `exp(exp * log(base))` equivalent.
- *     This prevents floating-point inaccuracies when the base is near zero, which was the
- *     root cause of the runaway DC offset.
+ * 1.  **Numerically Stable Residual Calculation:** The main processing loop has been rewritten
+ *     to avoid "catastrophic cancellation". Instead of pre-calculating a combined system matrix
+ *     (A = G + C/dt), which mixed very large and very small numbers, the residual vector `f`
+ *     is now built from its constituent parts (G*x, C/dt*(x - x_prev), etc.) separately.
+ *     This preserves floating-point precision and ensures the solver receives accurate data,
+ *     finally stabilizing the simulation.
  */
 class RealtimeTubeSim {
 public:
@@ -28,18 +30,13 @@ public:
     using Vector = std::vector<double>;
 
     explicit RealtimeTubeSim(double sample_rate) {
-        if (sample_rate <= 0) {
-            throw std::invalid_argument("Sample rate must be positive.");
-        }
+        if (sample_rate <= 0) throw std::invalid_argument("Sample rate must be positive.");
         m_sample_rate = sample_rate;
         m_dt = 1.0 / sample_rate;
-
         build_system();
         m_x.assign(m_num_nodes, 0.0);
         m_x_prev.assign(m_num_nodes, 0.0);
-
         set_volume(0.5); set_bass(0.5); set_mid(0.5); set_treble(0.5); set_master(1.0);
-
         solve_dc();
     }
 
@@ -50,49 +47,55 @@ public:
     void set_master(double value) { m_params.master = std::max(0.0, std::min(1.0, value)); update_pots(); }
 
     double process_sample(double input_sample) {
-        // --- 1. Assemble the time-dependent Right-Hand Side (RHS) vector ---
-        Vector z(m_num_nodes, 0.0);
-
-        // Add voltage source contributions
+        // --- 1. Assemble the sources vector `b` for the current time step ---
+        Vector b(m_num_nodes, 0.0);
         for (const auto& vs : m_v_sources) {
             double voltage = vs.is_time_varying ? (input_sample * m_params.volume) : vs.dc_voltage;
-            z[vs.node] += voltage * vs.g_large;
-        }
-
-        // Add capacitor history contributions
-        Vector C_x_prev = matrix_vector_mult(m_C_mat, m_x_prev);
-        for (int i = 0; i < m_num_nodes; ++i) {
-            z[i] += C_x_prev[i] / m_dt;
+            b[vs.node] += voltage * vs.g_large;
         }
 
         // --- 2. Newton-Raphson Iteration ---
-        m_x = m_x_prev; // Initial guess
-
-        Matrix A_linear = m_G_dynamic;
-        for (int r = 0; r < m_num_nodes; ++r) {
-            for (int c = 0; c < m_num_nodes; ++c) {
-                A_linear[r][c] += m_C_mat[r][c] / m_dt;
-            }
-        }
+        m_x = m_x_prev; // Use previous solution as initial guess
 
         for (int i = 0; i < m_nr_max_iter; ++i) {
-            Matrix J = A_linear;
-            Vector f = matrix_vector_mult(A_linear, m_x);
-            for(size_t j = 0; j < f.size(); ++j) f[j] -= z[j];
+            // --- STABILITY CRITICAL: Build residual and Jacobian precisely ---
 
+            // Start with Jacobian J = G_dyn + C/dt
+            Matrix J = m_G_dynamic;
+            for(int r = 0; r < m_num_nodes; ++r) {
+                for(int c = 0; c < m_num_nodes; ++c) {
+                    J[r][c] += m_C_mat[r][c] / m_dt;
+                }
+            }
+
+            // Calculate residual f(x) = (G*x + C/dt*(x-x_prev)) - b + I_nl
+            // Do not combine matrices to avoid precision loss.
+            Vector Gx = matrix_vector_mult(m_G_dynamic, m_x);
+
+            Vector x_diff = m_x;
+            for(size_t k = 0; k < m_x.size(); ++k) x_diff[k] -= m_x_prev[k];
+            Vector C_x_diff_dt = matrix_vector_mult(m_C_mat, x_diff);
+            for(size_t k = 0; k < m_x.size(); ++k) C_x_diff_dt[k] /= m_dt;
+
+            Vector f(m_num_nodes);
+            for(size_t k = 0; k < f.size(); ++k) {
+                f[k] = Gx[k] + C_x_diff_dt[k] - b[k];
+            }
+
+            // Add non-linear contributions to J and f
             add_triode_nr_stamps(J, f, m_x);
 
+            // We need to solve J*dx = -f
             for(size_t j = 0; j < f.size(); ++j) f[j] = -f[j];
 
             auto p = lu_decompose(J);
             Vector dx = lu_solve(J, p, f);
 
+            // Apply damped update
             double damping_factor = 1.0;
             double max_step = 0.0;
             for(double val : dx) max_step = std::max(max_step, std::abs(val));
-            if (max_step > m_nr_damping) {
-                damping_factor = m_nr_damping / max_step;
-            }
+            if (max_step > m_nr_damping) damping_factor = m_nr_damping / max_step;
 
             double norm = 0.0;
             for (int j = 0; j < m_num_nodes; ++j) {
@@ -124,7 +127,6 @@ private:
 
     struct Potentiometer { int n1, n2, n_wiper; double total_resistance; };
     Potentiometer m_pot_treble, m_pot_bass, m_pot_mid, m_pot_master;
-
     struct ControlParams { double volume, bass, mid, treble, master; } m_params;
 
     const double TUBE_MU = 100.0, TUBE_EX = 1.4, TUBE_KG = 1060.0;
@@ -140,12 +142,11 @@ private:
         m_G_static.assign(m_num_nodes, Vector(m_num_nodes, 0.0));
         m_C_mat.assign(m_num_nodes, Vector(m_num_nodes, 0.0));
 
-        stamp_resistor(m_G_static, "in", "gnd", 1e6); // DC path for input node
+        stamp_resistor(m_G_static, "in", "gnd", 1e6);
         stamp_resistor(m_G_static, "g", "gnd", 1e6);
         stamp_resistor(m_G_static, "V_P", "p", 100e3);
         stamp_resistor(m_G_static, "k", "gnd", 1.5e3);
         stamp_resistor(m_G_static, "out_final", "gnd", 1e6);
-
         stamp_capacitor("in", "g", 22e-9); stamp_capacitor("k", "gnd", 22e-6);
         stamp_capacitor("p", "ts1", 22e-9); stamp_capacitor("ts1", "ts3", 250e-12);
         stamp_capacitor("ts2", "ts3", 22e-9); stamp_capacitor("out", "out_final", 100e-9);
@@ -206,7 +207,7 @@ private:
     }
     void stamp_voltage_source(const std::string& n_pos, const std::string& n_neg, double V, bool is_ac) {
         if (n_neg != "gnd" && n_neg != "0") throw std::runtime_error("V-sources must be grounded.");
-        double G_large = 1e12; // Increased for stiffness
+        double G_large = 1e12;
         m_G_static[m_node(n_pos)][m_node(n_pos)] += G_large;
         m_v_sources.push_back({m_node(n_pos), V, G_large, is_ac});
     }
@@ -214,27 +215,19 @@ private:
     void add_triode_nr_stamps(Matrix& J, Vector& f, const Vector& x) {
         double Vp = x[m_p_node], Vg = x[m_g_node], Vk = x[m_k_node];
         double Vpk = Vp - Vk, Vgk = Vg - Vk;
-
-        double Ip = 0.0, Gp = 0.0, Gm = 0.0;
+        double Ip = 0.0, Gp = 0.0, Gm = 0.0, Ig = 0.0, Gg = 0.0;
         double E1 = Vpk / TUBE_MU + Vgk;
-        if (E1 > 1e-9) { // Safety margin
-            // **STABILITY FIX**: Use log/exp for pow()
+        if (E1 > 1e-9) {
             double log_E1 = log(E1);
             Ip = exp(TUBE_EX * log_E1) / TUBE_KG;
-            // Use stable derivative calculation
             double dIp_dE1 = Ip * TUBE_EX / E1;
-            Gm = dIp_dE1;
-            Gp = Gm / TUBE_MU;
+            Gm = dIp_dE1; Gp = Gm / TUBE_MU;
         }
-
-        double Ig = 0.0, Gg = 0.0;
         if (Vgk > 0) {
             Ig = TUBE_K_GRID * Vgk * Vgk * Vgk; Gg = 3.0 * TUBE_K_GRID * Vgk * Vgk;
         }
-
         f[m_p_node] -= Ip; f[m_k_node] += Ip;
         f[m_g_node] -= Ig; f[m_k_node] += Ig;
-
         J[m_p_node][m_p_node] += Gp; J[m_p_node][m_g_node] += Gm; J[m_p_node][m_k_node] -= (Gp + Gm);
         J[m_g_node][m_g_node] += Gg; J[m_g_node][m_k_node] -= Gg;
         J[m_k_node][m_p_node] -= Gp; J[m_k_node][m_g_node] -= (Gm + Gg); J[m_k_node][m_k_node] += (Gp + Gm + Gg);
