@@ -4,6 +4,8 @@
 #include <ranges>
 
 #include "sim.hpp"
+#include "tonestack.h"
+#include "waveshaper.h"
 
 /**
  * @brief Parses a RIFF WAVE file, processes its samples, and writes a new WAVE file.
@@ -260,7 +262,7 @@ void dump_netlist(const RealtimeTubeSim & sim) {
     std::cout << ".end" << std::endl;
 }
 
-int main(int argc, char *argv[]) {
+int mnasim_main(int argc, char *argv[]) {
     if (argc != 3) {
         std::cerr << "Usage: " << argv[0] << " <input.wav> <output.wav>" << std::endl;
         return 1;
@@ -342,4 +344,75 @@ int main(int argc, char *argv[]) {
     }
 
     return 0;
+}
+
+int waveshaper_main(int argc, char *argv[]) {
+    const std::string input_filename = argv[1];
+    const std::string output_filename = argv[2];
+
+    TriodeStageWaveShaper tubeSim;
+
+    std::cout << "--- 12AX7 Plate Voltage Simulation ---" << std::endl;
+    std::cout << "Input Voltage (Vin) | Simulated Plate (Vout) | Audio Signal (AC Coupled)" << std::endl;
+    std::cout << "----------------------------------------------------------------" << std::endl;
+
+    // Test with the same strategic points from the simulation
+    std::vector<double> test_voltages = {-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0};
+
+    std::cout << std::fixed << std::setprecision(2);
+
+    for (double vin : test_voltages) {
+        double vout = tubeSim.processSample(vin);
+        double ac_out = vout - tubeSim.getDCOffset();
+        std::cout << std::setw(19) << std::left << vin
+                  << "| " << std::setw(23) << std::left << vout
+                  << "| " << ac_out << std::endl;
+    }
+
+    // process input file and produce output file:
+    double min = 1.0, max = -1.0;
+    processWavFile(
+        input_filename,
+        output_filename,
+        [&](double sample) -> double {
+            double vout = tubeSim.processSample(sample * 4.0);
+            double ac_out = vout - tubeSim.getDCOffset();
+            if (ac_out > max) { max = ac_out; }
+            if (ac_out < min) { min = ac_out; }
+            return ac_out / 800.0;
+        }
+    );
+    std::cout << min << " " << max << std::endl;
+
+    return 0;
+}
+
+int tonestack_main(int argc, char *argv[]) {
+    const std::string input_filename = argv[1];
+    const std::string output_filename = argv[2];
+
+    ToneStack sim(48000.0);
+    sim.setParams(0.8, 0.1, 0.25, 0.75);
+
+    // process input file and produce output file:
+    double min = 1.0, max = -1.0;
+    processWavFile(
+        input_filename,
+        output_filename,
+        [&](double sample) -> double {
+            double vout = sim.process(sample);
+            double ac_out = vout;
+            if (ac_out > max) { max = ac_out; }
+            if (ac_out < min) { min = ac_out; }
+            return ac_out / 5.0;
+        }
+    );
+    std::cout << min << " " << max << std::endl;
+
+    return 0;
+}
+
+int main(int argc, char *argv[]) {
+    // return waveshaper_main(argc, argv);
+    return tonestack_main(argc, argv);
 }

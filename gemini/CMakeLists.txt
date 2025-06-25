@@ -6,5 +6,6 @@ set(CMAKE_CXX_STANDARD 20)
 add_executable(mkiicp
 		sim.hpp
         main.cpp
-		sim.hpp
-		wav.cpp)
+		wav.cpp
+		waveshaper.h
+		tonestack.h)
