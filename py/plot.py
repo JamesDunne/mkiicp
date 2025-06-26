@@ -1,185 +1,249 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
 from scipy.optimize import minimize
 
-# --- 1. Define All Constants and Target Curve ---
+# --- 1. Data Loading and Preparation ---
 
-# Define boundaries, constraints, and tolerance
-CLAMP_LOW_VG = -8.0
-CLAMP_HIGH_VG = 17.62846
-CLAMP_HIGH_VP = 405.0
-CLAMP_LOW_VP = 15.68266
-TOLERANCE = 0.5
-
-# Define the HARD boundaries for the final model
-b_seg1_end = -1.0
-b_seg2_end = 1.0
-
-# Load data
-df = pd.read_csv('Draft1.txt', sep='\t', usecols=['V(grid)', 'V(plate)'])
-df.rename(columns={'V(grid)': 'Vg', 'V(plate)': 'Vp'}, inplace=True)
-vg_orig, vp_orig = df['Vg'].to_numpy(), df['Vp'].to_numpy()
-
-# Hard constraints for the polynomials
-P1_CONSTRAINT = (-5.340293, 400.6191)
-P3_CONSTRAINT_1 = (5.253457, 37.7934)
-# NEW: Interpolate from original data to get Vp for the new constraints
-P3_CONSTRAINT_2 = (8.0, np.interp(8.0, vg_orig, vp_orig))
-P3_CONSTRAINT_3 = (13.5, np.interp(13.5, vg_orig, vp_orig))
-print("--- Added Pass-Through Constraints for Saturation Curve ---")
-print(f"Constraint at Vg=+8.0V -> Vp={P3_CONSTRAINT_2[1]:.4f}V")
-print(f"Constraint at Vg=+13.5V -> Vp={P3_CONSTRAINT_3[1]:.4f}V")
-
-
-# Create the target curve
-vp_target = vp_orig.copy()
-vp_target[vg_orig <= CLAMP_LOW_VG] = CLAMP_HIGH_VP
-vp_target[vg_orig >= CLAMP_HIGH_VG] = CLAMP_LOW_VP
-
-# --- 2. Solve and Fit Polynomials with Targeted Degrees ---
-
-# Helper functions
-def poly_func(p, x): return np.polyval(p, x)
-def poly_deriv_func(p, x): return np.polyval(np.polyder(p), x)
-def objective_func(p, x, y): return np.sum((poly_func(p, x) - y)**2)
-
-print("\n--- Starting Final High-Accuracy Modeling (Degrees: 4, 2, 6) ---")
-
-# == Segment 1: Quartic (unchanged) ==
-poly1_deg = 4
-fit_mask1 = (vg_orig >= CLAMP_LOW_VG - 1.0) & (vg_orig <= b_seg1_end + 1.0)
-vg_fit1, vp_fit1 = vg_orig[fit_mask1], vp_target[fit_mask1]
-p0_1 = np.polyfit(vg_fit1, vp_fit1, poly1_deg)
-constraints1 = [
-    {'type': 'eq', 'fun': lambda p: poly_func(p, CLAMP_LOW_VG) - CLAMP_HIGH_VP},
-    {'type': 'eq', 'fun': lambda p: poly_deriv_func(p, CLAMP_LOW_VG) - 0.0},
-    {'type': 'eq', 'fun': lambda p: poly_func(p, P1_CONSTRAINT[0]) - P1_CONSTRAINT[1]}
-]
-res1 = minimize(objective_func, p0_1, args=(vg_fit1, vp_fit1), method='SLSQP', constraints=constraints1)
-poly1 = np.poly1d(res1.x)
-print(f"Segment 1 (Quartic) Fit Success: {res1.success}")
-
-# == Segment 2: Quadratic (unchanged) ==
-val_at_join1 = poly1(b_seg1_end)
-deriv_at_join1 = np.polyder(poly1)(b_seg1_end)
-poly2_deg = 2
-fit_mask2 = (vg_orig >= b_seg1_end - 1.0) & (vg_orig <= b_seg2_end + 1.0)
-vg_fit2, vp_fit2 = vg_orig[fit_mask2], vp_target[fit_mask2]
-p0_2 = np.polyfit(vg_fit2, vp_fit2, poly2_deg)
-constraints2 = [
-    {'type': 'eq', 'fun': lambda p: poly_func(p, b_seg1_end) - val_at_join1},
-    {'type': 'eq', 'fun': lambda p: poly_deriv_func(p, b_seg1_end) - deriv_at_join1}
-]
-res2 = minimize(objective_func, p0_2, args=(vg_fit2, vp_fit2), method='SLSQP', constraints=constraints2)
-poly2 = np.poly1d(res2.x)
-print(f"Segment 2 (Quadratic) Fit Success: {res2.success}")
-
-# == Segment 3: 6th-Degree Polynomial via Direct Solver ==
-print("Segment 3 (6th-Degree): Solving directly for a unique ripple-free solution...")
-val_at_join2 = poly2(b_seg2_end)
-deriv_at_join2 = np.polyder(poly2)(b_seg2_end)
-# Define the 7 constraints
-c = [
-    (b_seg2_end, val_at_join2),
-    (P3_CONSTRAINT_1[0], P3_CONSTRAINT_1[1]),
-    (P3_CONSTRAINT_2[0], P3_CONSTRAINT_2[1]),
-    (P3_CONSTRAINT_3[0], P3_CONSTRAINT_3[1]),
-    (CLAMP_HIGH_VG, CLAMP_LOW_VP),
-]
-dc = [
-    (b_seg2_end, deriv_at_join2),
-    (CLAMP_HIGH_VG, 0.0)
-]
-# Build the A matrix (7x7) and B vector (7x1) for A*p = B
-poly3_deg = 6
-A = []
-B = []
-# Add value constraint rows
-for x, y in c:
-    A.append([x**(poly3_deg-i) for i in range(poly3_deg+1)])
-    B.append(y)
-# Add derivative constraint rows
-for x, dy in dc:
-    A.append([(poly3_deg-i)*x**(poly3_deg-i-1) if (poly3_deg-i)>0 else 0 for i in range(poly3_deg+1)])
-    B.append(dy)
-# Solve the system
+# Load the data from the text file
 try:
-    p3 = np.linalg.solve(np.array(A), np.array(B))
-    poly3 = np.poly1d(p3)
-    print("Segment 3 Direct Solution Success.")
-except np.linalg.LinAlgError:
-    print("FATAL: Could not solve for Segment 3 coefficients.")
+    with open('Draft1.txt', 'r') as f:
+        data_content = f.read()
+    
+    # Use pandas to read the tab-delimited data
+    from io import StringIO
+    df = pd.read_csv(StringIO(data_content), sep='\t')
+    
+    # Rename columns as requested
+    df = df.rename(columns={'V(grid)': 'Vg', 'V(plate)': 'Vp'})
+
+    # Convert to NumPy arrays for numerical operations
+    vg_data = df['Vg'].values
+    vp_data = df['Vp'].values
+
+    print("Data loaded successfully.")
+    print(f"Loaded {len(df)} data points.")
+
+except FileNotFoundError:
+    print("Error: Draft1.txt not found. Please ensure the file is in the same directory.")
     exit()
 
-print("\n--- Final Polynomial Coefficients ---")
-print(f"Segment 1 (Deg 4):\n{poly1}\n")
-print(f"Segment 2 (Deg 2):\n{poly2}\n")
-print(f"Segment 3 (Deg 6):\n{poly3}\n")
+# Create an interpolation function to get original Vp values at any Vg
+get_original_vp = interp1d(vg_data, vp_data, bounds_error=False, fill_value="extrapolate")
 
-# --- 3. Final Model Construction and Verification ---
-def model_vp(vg):
-    vg = np.asarray(vg)
-    vp = np.zeros_like(vg, dtype=float)
-    conds = [
-        vg <= CLAMP_LOW_VG, (vg > CLAMP_LOW_VG) & (vg <= b_seg1_end),
-        (vg > b_seg1_end) & (vg <= b_seg2_end), (vg > b_seg2_end) & (vg <= CLAMP_HIGH_VG),
-        vg > CLAMP_HIGH_VG
-    ]
-    funcs = [lambda x: CLAMP_HIGH_VP, poly1, poly2, poly3, lambda x: CLAMP_LOW_VP]
-    for cond, func in zip(conds, funcs): vp[cond] = func(vg[cond])
-    return vp
+# --- 2. Define Constants and Segments ---
 
-# --- 4. Plotting and Error Analysis ---
-vg_model_fine = np.linspace(-24, 24, 2000)
-vp_model_fine = model_vp(vg_model_fine)
-fit_range_mask = (vg_orig >= CLAMP_LOW_VG) & (vg_orig <= CLAMP_HIGH_VG)
-vg_fit_range = vg_orig[fit_range_mask]
-vp_target_fit_range = vp_target[fit_range_mask]
-vp_model_fit_range = model_vp(vg_fit_range)
-error = vp_model_fit_range - vp_target_fit_range
+# Polynomial degree (cubic is a good choice for curves)
+POLY_DEGREE = 3
+COEFF_COUNT = POLY_DEGREE + 1
 
-# Main Plot
-plt.style.use('seaborn-v0_8-whitegrid')
-fig1, ax1 = plt.subplots(figsize=(16, 9))
-ax1.plot(vg_orig, vp_orig, 'o', color='lightgray', markersize=4, label='Original SPICE Data')
-ax1.plot(vg_orig, vp_target, '-', color='royalblue', linewidth=3, alpha=0.6, label='Target Curve')
-ax1.plot(vg_model_fine, vp_model_fine, '--', color='red', linewidth=2.5, label='Final Model (Degs: 4, 2, 6)')
-b_list = [CLAMP_LOW_VG, b_seg1_end, b_seg2_end, CLAMP_HIGH_VG]
-ax1.axvline(x=b_list[0], color='k', linestyle=':', label='Segment Boundaries')
-for b in b_list[1:]: ax1.axvline(x=b, color='k', linestyle=':')
-p_list = [P1_CONSTRAINT, P3_CONSTRAINT_1, P3_CONSTRAINT_2, P3_CONSTRAINT_3]
-ax1.plot(p_list[0][0], p_list[0][1], 'X', color='darkorange', markersize=12, mew=2, label='Constraint Points')
-for p in p_list[1:]: ax1.plot(p[0], p[1], 'X', color='darkorange', markersize=12, mew=2)
-ax1.legend(fontsize=11)
-ax1.set_title('Final High-Accuracy Model with Pinned Saturation Curve', fontsize=16)
-ax1.set_xlabel('Grid Voltage (Vg) [V]', fontsize=12)
-ax1.set_ylabel('Plate Voltage (Vp) [V]', fontsize=12)
-ax1.set_xlim(-25, 25)
-ax1.set_ylim(0, 425)
-ax1.grid(True, which='both')
-plt.tight_layout()
-plt.show()
+# Segment boundaries
+VG_START = -8.0
+VG_CUTOFF_END = -1.0
+VG_LINEAR_END = 1.0
+VG_SAT_END = 17.62846
 
-# Error Plot
-fig2, ax2 = plt.subplots(figsize=(16, 9))
-ax2.plot(vg_fit_range, error, 'o', color='crimson', markersize=5, label='Model Error')
-ax2.axhline(y=TOLERANCE, color='green', linestyle='--', label=f'Tolerance (+/- {TOLERANCE}V)')
-ax2.axhline(y=-TOLERANCE, color='green', linestyle='--')
-ax2.axhline(y=0, color='black', linestyle='-', linewidth=0.7)
-ax2.set_title('Model Error (Final Model vs. Target Curve)', fontsize=16)
-ax2.set_xlabel('Grid Voltage (Vg) [V]', fontsize=12)
-ax2.set_ylabel('Error (Vp_model - Vp_target) [V]', fontsize=12)
-ax2.set_xlim(CLAMP_LOW_VG, CLAMP_HIGH_VG)
-ax2.set_ylim(-TOLERANCE * 1.2, TOLERANCE * 1.2)
-ax2.legend(fontsize=11)
-ax2.grid(True, which='both')
-print(f"\n--- Final Error Analysis (Tolerance: +/- {TOLERANCE}V) ---")
-print(f"Maximum positive error: {np.max(error):.4f} V")
-print(f"Maximum negative error: {np.min(error):.4f} V")
-if np.all(np.abs(error) <= TOLERANCE):
-    print("Success: All points are within the specified tolerance.")
+# Clamping values
+CLAMP_HIGH_V = 405.0
+# The saturation clamp value is the Vp at the end of the saturation curve
+CLAMP_LOW_V = get_original_vp(VG_SAT_END) 
+
+# Specific constraint points
+CUTOFF_CONSTRAINT_VG = -5.340293
+CUTOFF_CONSTRAINT_VP = 400.6191
+SATURATION_CONSTRAINT_VG = 5.253457
+SATURATION_CONSTRAINT_VP = 37.7934
+
+# Overlap for fitting windows to prevent ripple at edges
+# This extends the data used for fitting beyond the segment boundaries
+FIT_OVERLAP = 2.0 
+
+# --- 3. Setup for Optimization ---
+
+# Helper function to evaluate a polynomial from a coefficient list
+def eval_poly(coeffs, x):
+    return np.polyval(coeffs, x)
+
+# Helper function to evaluate the derivative of a polynomial
+def eval_poly_deriv(coeffs, x):
+    deriv_coeffs = np.polyder(coeffs)
+    return np.polyval(deriv_coeffs, x)
+
+# Objective function: Minimize the total squared error across all segments
+def objective(p, vg_data, vp_data):
+    # Unpack the 12 coefficients into 3 sets of 4
+    p_cutoff = p[0:COEFF_COUNT]
+    p_linear = p[COEFF_COUNT:2*COEFF_COUNT]
+    p_saturation = p[2*COEFF_COUNT:3*COEFF_COUNT]
+
+    # --- Define fitting windows (wider than segments) ---
+    # Cutoff fit window
+    idx_cutoff = (vg_data >= VG_START - FIT_OVERLAP) & (vg_data <= VG_CUTOFF_END + FIT_OVERLAP)
+    # Linear fit window
+    idx_linear = (vg_data >= VG_CUTOFF_END - FIT_OVERLAP) & (vg_data <= VG_LINEAR_END + FIT_OVERLAP)
+    # Saturation fit window
+    idx_saturation = (vg_data >= VG_LINEAR_END - FIT_OVERLAP) & (vg_data <= VG_SAT_END + FIT_OVERLAP)
+    
+    # --- Calculate errors ---
+    err_cutoff = np.sum((vp_data[idx_cutoff] - eval_poly(p_cutoff, vg_data[idx_cutoff]))**2)
+    err_linear = np.sum((vp_data[idx_linear] - eval_poly(p_linear, vg_data[idx_linear]))**2)
+    err_saturation = np.sum((vp_data[idx_saturation] - eval_poly(p_saturation, vg_data[idx_saturation]))**2)
+    
+    return err_cutoff + err_linear + err_saturation
+
+# --- 4. Define Constraints for the Optimizer ---
+
+# Each constraint function takes the coefficient vector `p` and returns a value.
+# For 'eq' type, the value must be 0. For 'ineq' type, it must be >= 0.
+
+constraints = []
+
+# --- A. Equality Constraints ('eq') ---
+
+# C0 Continuity: Polynomials must meet at boundaries
+# Constraint 1: Cutoff and Linear polys meet at VG_CUTOFF_END
+constraints.append({'type': 'eq', 'fun': lambda p: eval_poly(p[0:COEFF_COUNT], VG_CUTOFF_END) - eval_poly(p[COEFF_COUNT:2*COEFF_COUNT], VG_CUTOFF_END)})
+# Constraint 2: Linear and Saturation polys meet at VG_LINEAR_END
+constraints.append({'type': 'eq', 'fun': lambda p: eval_poly(p[COEFF_COUNT:2*COEFF_COUNT], VG_LINEAR_END) - eval_poly(p[2*COEFF_COUNT:3*COEFF_COUNT], VG_LINEAR_END)})
+
+# C1 Continuity: Derivatives must match at boundaries for smoothness
+# Constraint 3: Cutoff and Linear derivatives match
+constraints.append({'type': 'eq', 'fun': lambda p: eval_poly_deriv(p[0:COEFF_COUNT], VG_CUTOFF_END) - eval_poly_deriv(p[COEFF_COUNT:2*COEFF_COUNT], VG_CUTOFF_END)})
+# Constraint 4: Linear and Saturation derivatives match
+constraints.append({'type': 'eq', 'fun': lambda p: eval_poly_deriv(p[COEFF_COUNT:2*COEFF_COUNT], VG_LINEAR_END) - eval_poly_deriv(p[2*COEFF_COUNT:3*COEFF_COUNT], VG_LINEAR_END)})
+
+# Boundary Value Constraints: Match original curve at segment start/end
+# Constraint 5: Cutoff poly must start at the correct Vp value
+constraints.append({'type': 'eq', 'fun': lambda p: eval_poly(p[0:COEFF_COUNT], VG_START) - get_original_vp(VG_START)})
+# Constraint 6: Saturation poly must end at the correct Vp value
+constraints.append({'type': 'eq', 'fun': lambda p: eval_poly(p[2*COEFF_COUNT:3*COEFF_COUNT], VG_SAT_END) - get_original_vp(VG_SAT_END)})
+
+# Specific Point Constraints
+# Constraint 7: Cutoff knee must pass through the specified point
+constraints.append({'type': 'eq', 'fun': lambda p: eval_poly(p[0:COEFF_COUNT], CUTOFF_CONSTRAINT_VG) - CUTOFF_CONSTRAINT_VP})
+# Constraint 8: Saturation knee must pass through its specified point
+constraints.append({'type': 'eq', 'fun': lambda p: eval_poly(p[2*COEFF_COUNT:3*COEFF_COUNT], SATURATION_CONSTRAINT_VG) - SATURATION_CONSTRAINT_VP})
+
+
+# --- B. Inequality Constraints ('ineq') ---
+
+# Constraint: Polynomials must not exceed B+ voltage (405V)
+# We check this on a fine grid of points within each segment
+def check_b_plus(p):
+    # Unpack coefficients
+    p_cutoff = p[0:COEFF_COUNT]
+    p_linear = p[COEFF_COUNT:2*COEFF_COUNT]
+    p_saturation = p[2*COEFF_COUNT:3*COEFF_COUNT]
+    
+    # Create test grids
+    vg_grid_cutoff = np.linspace(VG_START, VG_CUTOFF_END, 20)
+    vg_grid_linear = np.linspace(VG_CUTOFF_END, VG_LINEAR_END, 20)
+    vg_grid_saturation = np.linspace(VG_LINEAR_END, VG_SAT_END, 20)
+    
+    # Calculate predicted Vp
+    vp_pred_cutoff = eval_poly(p_cutoff, vg_grid_cutoff)
+    vp_pred_linear = eval_poly(p_linear, vg_grid_linear)
+    vp_pred_saturation = eval_poly(p_saturation, vg_grid_saturation)
+    
+    # The constraint is CLAMP_HIGH_V - Vp >= 0.
+    # We return the minimum of this value. If it's >= 0, all points are valid.
+    min_diff_cutoff = np.min(CLAMP_HIGH_V - vp_pred_cutoff)
+    min_diff_linear = np.min(CLAMP_HIGH_V - vp_pred_linear)
+    min_diff_saturation = np.min(CLAMP_HIGH_V - vp_pred_saturation)
+    
+    return min(min_diff_cutoff, min_diff_linear, min_diff_saturation)
+
+constraints.append({'type': 'ineq', 'fun': check_b_plus})
+
+
+# --- 5. Run the Optimization ---
+
+# Generate a good initial guess (p0) by doing a simple polyfit on each segment
+p0_cutoff = np.polyfit(vg_data[(vg_data >= VG_START) & (vg_data < VG_CUTOFF_END)], 
+                       vp_data[(vg_data >= VG_START) & (vg_data < VG_CUTOFF_END)], POLY_DEGREE)
+p0_linear = np.polyfit(vg_data[(vg_data >= VG_CUTOFF_END) & (vg_data < VG_LINEAR_END)], 
+                       vp_data[(vg_data >= VG_CUTOFF_END) & (vg_data < VG_LINEAR_END)], POLY_DEGREE)
+p0_saturation = np.polyfit(vg_data[(vg_data >= VG_LINEAR_END) & (vg_data <= VG_SAT_END)], 
+                           vp_data[(vg_data >= VG_LINEAR_END) & (vg_data <= VG_SAT_END)], POLY_DEGREE)
+
+p0 = np.concatenate([p0_cutoff, p0_linear, p0_saturation])
+
+print("Starting optimization... This may take a moment.")
+result = minimize(objective, p0, args=(vg_data, vp_data), method='SLSQP', constraints=constraints, options={'maxiter': 1000})
+
+if result.success:
+    print("Optimization successful!")
+    p_opt = result.x
+    # Unpack final optimized coefficients
+    p_opt_cutoff = p_opt[0:COEFF_COUNT]
+    p_opt_linear = p_opt[COEFF_COUNT:2*COEFF_COUNT]
+    p_opt_saturation = p_opt[2*COEFF_COUNT:3*COEFF_COUNT]
 else:
-    print("Warning: Some points exceed the specified tolerance.")
+    print("Optimization failed.")
+    print(result.message)
+    exit()
+
+# --- 6. Create the Final Piecewise Model Function ---
+
+def get_model_vp(vg):
+    vg = np.asarray(vg)
+    # Create an empty array for the results
+    vp_out = np.zeros_like(vg, dtype=float)
+
+    # Define conditions for each segment
+    cond_clamp_high = vg < VG_START
+    cond_cutoff = (vg >= VG_START) & (vg < VG_CUTOFF_END)
+    cond_linear = (vg >= VG_CUTOFF_END) & (vg < VG_LINEAR_END)
+    cond_saturation = (vg >= VG_LINEAR_END) & (vg <= VG_SAT_END)
+    cond_clamp_low = vg > VG_SAT_END
+
+    # Apply the correct function based on the condition
+    vp_out[cond_clamp_high] = CLAMP_HIGH_V
+    vp_out[cond_cutoff] = eval_poly(p_opt_cutoff, vg[cond_cutoff])
+    vp_out[cond_linear] = eval_poly(p_opt_linear, vg[cond_linear])
+    vp_out[cond_saturation] = eval_poly(p_opt_saturation, vg[cond_saturation])
+    vp_out[cond_clamp_low] = CLAMP_LOW_V
+    
+    return vp_out
+
+
+# --- 7. Visualization ---
+
+print("Generating plot...")
+
+# Create a dense grid of Vg points for smooth plotting
+vg_plot = np.linspace(-24, 24, 2000)
+vp_model_plot = get_model_vp(vg_plot)
+
+# Create the plot
+plt.style.use('seaborn-v0_8-whitegrid')
+fig, ax = plt.subplots(figsize=(16, 9))
+
+# Plot original data
+ax.plot(vg_data, vp_data, 'o', color='skyblue', label='Original SPICE Data', markersize=4, alpha=0.7, zorder=1)
+
+# Plot the final stitched model
+ax.plot(vg_plot, vp_model_plot, '-', color='red', label='Stitched Polynomial Model', linewidth=2.5, zorder=2)
+
+# Highlight the constraint points and boundaries to verify the fit
+constraint_vgs = [VG_START, VG_CUTOFF_END, VG_LINEAR_END, VG_SAT_END, CUTOFF_CONSTRAINT_VG, SATURATION_CONSTRAINT_VG]
+constraint_vps = get_model_vp(constraint_vgs)
+ax.plot(constraint_vgs, constraint_vps, 'x', color='black', markersize=10, mew=2, label='Segment Boundaries & Constraints', zorder=3)
+
+# Add B+ line
+ax.axhline(y=CLAMP_HIGH_V, color='gray', linestyle='--', label=f'B+ Voltage Limit ({CLAMP_HIGH_V}V)')
+
+# Formatting
+ax.set_title('12AX7 Triode Vp vs. Vg Model (SPICE Data vs. Constrained Polynomial Fit)', fontsize=16)
+ax.set_xlabel('Grid Voltage (Vg) [V]', fontsize=12)
+ax.set_ylabel('Plate Voltage (Vp) [V]', fontsize=12)
+ax.legend(fontsize=11)
+ax.grid(True, which='both', linestyle='--', linewidth=0.5)
+
+# Set plot limits to focus on the important area
+ax.set_xlim(-25, 25)
+ax.set_ylim(-10, CLAMP_HIGH_V + 20)
+
 plt.tight_layout()
 plt.show()
