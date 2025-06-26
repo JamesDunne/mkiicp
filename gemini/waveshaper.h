@@ -1,66 +1,72 @@
 #include <iostream>
 #include <vector>
-#include <iomanip> // For std::fixed and std::setprecision
+#include <cmath> // For std::pow in the test, not in the optimized model
 
-/**
- * @class TriodeStageWaveShaper
- * @brief Simulates the static non-linear gain of a 12AX7 common-cathode stage.
- *
- * This class implements a 5th-order polynomial approximation of the
- * Vout vs. Vin transfer curve derived from a SPICE DC simulation.
- * It models the instantaneous (memoryless) behavior of the tube stage.
- *
- * Circuit Parameters Used for Simulation:
- * - Tube: 12AX7
- * - Plate Resistor: 150k Ohm
- * - Cathode Resistor: 1.5k Ohm
- * - B+ Voltage: 405V
- * - Input Signal Range: -1.0V to +1.0V centered around 0V bias.
- */
-class TriodeStageWaveShaper {
+class TubeAmpModel {
 public:
-    TriodeStageWaveShaper() {
-        // Polynomial coefficients for:
-        // Vout = p5*Vin^5 + p4*Vin^4 + p3*Vin^3 + p2*Vin^2 + p1*Vin + p0
-        // Derived from SPICE .DC sweep from Vin = -1.0V to +1.0V
-        p5 =  2.990;
-        p4 = -2.964;
-        p3 = -11.97;
-        p2 =  12.04;
-        p1 = -76.10;
-        p0 =  236.2; // DC Bias offset
-    }
+    // Constructor
+    TubeAmpModel() = default;
 
-    /**
-     * @brief Processes a single input sample (voltage) to produce an output sample.
-     * @param vin The input voltage sample. Should be in the range [-1.0, 1.0].
-     * @return The resulting output voltage from the simulated tube stage.
-     */
-    double processSample(double vin) const {
-        // To accurately model the gain structure, we first get the non-linear output
-        // which includes the large DC offset. This is the "absolute" plate voltage.
-        // We use Horner's method for efficient polynomial evaluation:
-        // p0 + x*(p1 + x*(p2 + x*(p3 + x*(p4 + x*p5))))
-        double v_plate = p0 + vin * (p1 + vin * (p2 + vin * (p3 + vin * (p4 + vin * p5))));
-
-        // In a real audio plugin, you would likely want to remove the DC offset
-        // to get an audio signal centered around 0. This is done by subtracting
-        // the quiescent voltage (the output when input is 0).
-        // double v_audio_out = v_plate - p0;
-        //
-        // However, the request is to simulate the plate output, so we return the
-        // full plate voltage.
-        return v_plate;
-    }
-    
-    /**
-     * @brief Returns the DC bias voltage (output when input is 0V).
-     */
-    double getDCOffset() const {
-        return p0;
+    // Process a single sample of the grid voltage to get the plate voltage.
+    // This is designed for real-time audio processing.
+    double process(double gridVoltage) const {
+        // Region 1: Cutoff (tube is off)
+        if (gridVoltage < B1_CUTOFF) {
+            return 405.0;
+        }
+        // Region 2: First polynomial segment (approaching linear region)
+        else if (gridVoltage < B2_INFLECTION1) {
+            return evalPoly(gridVoltage, P1_A, P1_B, P1_C, P1_D, P1_E, P1_F);
+        }
+        // Region 3: Second polynomial segment (most linear region)
+        else if (gridVoltage < B3_INFLECTION2) {
+            return evalPoly(gridVoltage, P2_A, P2_B, P2_C, P2_D, P2_E, P2_F);
+        }
+        // Region 4: Third polynomial segment (approaching saturation)
+        else if (gridVoltage < B4_SATURATION) {
+            return evalPoly(gridVoltage, P3_A, P3_B, P3_C, P3_D, P3_E, P3_F);
+        }
+        // Region 5: Saturation (grid conducting heavily)
+        else {
+            return 16.4;
+        }
     }
 
 private:
-    // Polynomial coefficients
-    double p5, p4, p3, p2, p1, p0;
+    // --- Boundary Points ---
+    // These constants define the grid voltage ranges for each polynomial.
+    static constexpr double B1_CUTOFF      = -8.0;
+    static constexpr double B2_INFLECTION1 = -4.38;
+    static constexpr double B3_INFLECTION2 = -0.73;
+    static constexpr double B4_SATURATION  = 0.96;
+
+    // --- Polynomial 1 Coefficients: Vg in [-8.0, -4.38] ---
+    static constexpr double P1_A = -0.063718;
+    static constexpr double P1_B = -1.542918;
+    static constexpr double P1_C = -13.849313;
+    static constexpr double P1_D = -55.882995;
+    static constexpr double P1_E = -96.393165;
+    static constexpr double P1_F = -1.916161;
+
+    // --- Polynomial 2 Coefficients: Vg in [-4.38, -0.73] ---
+    static constexpr double P2_A = 0.536341;
+    static constexpr double P2_B = 3.651717;
+    static constexpr double P2_C = 3.591434;
+    static constexpr double P2_D = -19.462319;
+    static constexpr double P2_E = -82.611183;
+    static constexpr double P2_F = 175.717978;
+
+    // --- Polynomial 3 Coefficients: Vg in [-0.73, 0.96] ---
+    static constexpr double P3_A = 8.139139;
+    static constexpr double P3_B = -4.321855;
+    static constexpr double P3_C = -21.053424;
+    static constexpr double P3_D = -1.419223;
+    static constexpr double P3_E = -83.693156;
+    static constexpr double P3_F = 171.328325;
+
+    // Efficiently evaluate a 5th-degree polynomial using Horner's method.
+    // P(x) = f + x*(e + x*(d + x*(c + x*(b + x*a))))
+    inline double evalPoly(double x, double a, double b, double c, double d, double e, double f) const {
+        return f + x * (e + x * (d + x * (c + x * (b + x * a))));
+    }
 };

@@ -346,47 +346,6 @@ int mnasim_main(int argc, char *argv[]) {
     return 0;
 }
 
-int waveshaper_main(int argc, char *argv[]) {
-    const std::string input_filename = argv[1];
-    const std::string output_filename = argv[2];
-
-    TriodeStageWaveShaper tubeSim;
-
-    std::cout << "--- 12AX7 Plate Voltage Simulation ---" << std::endl;
-    std::cout << "Input Voltage (Vin) | Simulated Plate (Vout) | Audio Signal (AC Coupled)" << std::endl;
-    std::cout << "----------------------------------------------------------------" << std::endl;
-
-    // Test with the same strategic points from the simulation
-    std::vector<double> test_voltages = {-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0};
-
-    std::cout << std::fixed << std::setprecision(2);
-
-    for (double vin : test_voltages) {
-        double vout = tubeSim.processSample(vin);
-        double ac_out = vout - tubeSim.getDCOffset();
-        std::cout << std::setw(19) << std::left << vin
-                  << "| " << std::setw(23) << std::left << vout
-                  << "| " << ac_out << std::endl;
-    }
-
-    // process input file and produce output file:
-    double min = 1.0, max = -1.0;
-    processWavFile(
-        input_filename,
-        output_filename,
-        [&](double sample) -> double {
-            double vout = tubeSim.processSample(sample * 4.0);
-            double ac_out = vout - tubeSim.getDCOffset();
-            if (ac_out > max) { max = ac_out; }
-            if (ac_out < min) { min = ac_out; }
-            return ac_out / 800.0;
-        }
-    );
-    std::cout << min << " " << max << std::endl;
-
-    return 0;
-}
-
 int tonestack_main(int argc, char *argv[]) {
     const std::string input_filename = argv[1];
     const std::string output_filename = argv[2];
@@ -412,7 +371,46 @@ int tonestack_main(int argc, char *argv[]) {
     return 0;
 }
 
+int tubestage_main() {
+    TubeAmpModel v1a;
+
+    std::cout << "--- Tube Amp Model Verification ---" << std::endl;
+    std::cout.precision(4);
+    std::cout << std::fixed;
+
+    // Test key points described in the problem
+    std::vector<double> testGridVoltages = {
+        -24.0, -10.0, -8.0, // Cutoff region
+        -6.0,             // Poly 1
+        -4.38,            // Boundary 1/2
+        -2.0,             // Poly 2
+        -0.73,            // Boundary 2/3
+         0.0,             // Poly 3 (near zero crossing)
+         0.5,             // Poly 3
+         0.96,            // Saturation boundary
+         1.0, 24.0         // Saturation region
+    };
+
+    std::cout << "Grid (V)  | Plate (V)" << std::endl;
+    std::cout << "----------|-----------" << std::endl;
+
+    for (double vg : testGridVoltages) {
+        double vp = v1a.process(vg);
+        std::cout << (vg >= 0 ? " " : "") << vg << "    | " << vp << std::endl;
+    }
+
+    // Verification against known values from simulation
+    std::cout << "\n--- Comparison with SPICE key points ---" << std::endl;
+    std::cout << "Model at Vg=-8.00V: " << v1a.process(-8.0) << " V (SPICE: ~404.9V)" << std::endl;
+    std::cout << "Model at Vg=-4.38V: " << v1a.process(-4.38) << " V (SPICE: ~359.7V)" << std::endl;
+    std::cout << "Model at Vg=-0.73V: " << v1a.process(-0.73) << " V (SPICE: ~119.3V)" << std::endl;
+    std::cout << "Model at Vg=+0.96V: " << v1a.process(0.96) << " V (SPICE: ~16.4V)" << std::endl;
+
+
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
-    // return waveshaper_main(argc, argv);
-    return tonestack_main(argc, argv);
+    // return tonestack_main(argc, argv);
+    return tubestage_main();
 }
