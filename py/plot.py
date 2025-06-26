@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import splrep, splev
-from scipy.optimize import minimize
+from scipy.optimize import minimize, minimize_scalar
 
 # --- 1. Load and Prepare Data ---
 try:
@@ -23,17 +23,17 @@ B_PLUS_LIMIT = 405.0
 spline_mask = (Vg_data >= -12.0) & (Vg_data <= b[-1])
 tck = splrep(Vg_data[spline_mask], Vp_data[spline_mask], s=0.5)
 
-# Find true apexes by finding zero-crossings of the 3rd derivative
-spline_d3 = splev(np.linspace(-10, 15, 1000), tck, der=3)
-zero_crossings = np.where(np.diff(np.sign(spline_d3)))[0]
-vg_grid = np.linspace(-10, 15, 1000)
-cutoff_apex_vg = vg_grid[zero_crossings[0]]
-sat_apex_vg = vg_grid[zero_crossings[1]]
-cutoff_apex_vp = splev(cutoff_apex_vg, tck)
-sat_apex_vp = splev(sat_apex_vg, tck)
+# Find Vg for the "cutoff knee" by finding point of maximum curvature (min of 2nd derivative)
+res_cutoff_knee = minimize_scalar(lambda x: splev(x, tck, der=2), bounds=(-8, -2), method='bounded')
+cutoff_knee_vg = res_cutoff_knee.x
+cutoff_knee_vp = splev(cutoff_knee_vg, tck)
 
-print(f"Cutoff Knee Apex (3rd deriv zero): Vg={cutoff_apex_vg:.4f}, Vp={cutoff_apex_vp:.4f}")
-print(f"Saturation Shoulder Apex (3rd deriv zero): Vg={sat_apex_vg:.4f}, Vp={sat_apex_vp:.4f}")
+# Use the user-specified Vg for the saturation shoulder
+sat_shoulder_vg = 4.53
+sat_shoulder_vp = splev(sat_shoulder_vg, tck)
+
+print(f"Cutoff Knee Pin: Vg={cutoff_knee_vg:.4f}, Vp={cutoff_knee_vp:.4f}")
+print(f"Saturation Shoulder Pin (User-specified): Vg={sat_shoulder_vg:.4f}, Vp={sat_shoulder_vp:.4f}")
 
 def objective_func(c, vg, vp): return np.sum((np.polyval(c, vg) - vp)**2)
 all_coeffs = [None] * 3
@@ -47,7 +47,7 @@ vp_s3_target = splev(vg_s3_fit, tck)
 s3_constraints = [
     {'type': 'eq', 'fun': lambda c: np.polyval(c, s3_start) - splev(s3_start, tck)},
     {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), s3_start) - splev(s3_start, tck, der=1)},
-    {'type': 'eq', 'fun': lambda c: np.polyval(c, sat_apex_vg) - sat_apex_vp},
+    {'type': 'eq', 'fun': lambda c: np.polyval(c, sat_shoulder_vg) - sat_shoulder_vp},
     {'type': 'eq', 'fun': lambda c: np.polyval(c, s3_end) - splev(s3_end, tck)},
     {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), s3_end)}
 ]
@@ -81,7 +81,7 @@ s1_constraints = [
     {'type': 'eq', 'fun': lambda c: np.polyval(c, s1_end_fit) - splev(s1_end_fit, tck)},
     {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), s1_end_fit) - splev(s1_end_fit, tck, der=1)},
     {'type': 'eq', 'fun': lambda c: np.polyval(c, b[0]) - splev(b[0], tck)},
-    {'type': 'eq', 'fun': lambda c: np.polyval(c, cutoff_apex_vg) - cutoff_apex_vp},
+    {'type': 'eq', 'fun': lambda c: np.polyval(c, cutoff_knee_vg) - cutoff_knee_vp},
     {'type': 'ineq', 'fun': robust_b_plus_check}
 ]
 all_coeffs[0] = minimize(objective_func, np.polyfit(vg_s1_fit, vp_s1_target, poly_deg), args=(vg_s1_fit, vp_s1_target), method='SLSQP', constraints=s1_constraints).x
@@ -105,8 +105,8 @@ fig, ax = plt.subplots(figsize=(15, 9))
 vg_plot_range = np.linspace(-12, 18, 2000)
 ax.plot(Vg_data, Vp_data, 'o', ms=3, label='SPICE Data', color='gray', alpha=0.6)
 ax.plot(vg_plot_range, model_12ax7(vg_plot_range), label='Definitive Production Model', color='red', lw=2.5)
-pin_vgs = [b[0], cutoff_apex_vg, sat_apex_vg, b[3]]
-pin_vps = [p1(b[0]), p1(cutoff_apex_vg), p3(sat_apex_vg), p3(b[3])]
+pin_vgs = [b[0], cutoff_knee_vg, sat_shoulder_vg, b[3]]
+pin_vps = [p1(b[0]), p1(cutoff_knee_vg), p3(sat_shoulder_vg), p3(b[3])]
 ax.plot(pin_vgs, pin_vps, 'x', color='blue', markersize=10, mew=2, label='Pinned Points')
 for bound in b: ax.axvline(bound, color='k', ls=':', alpha=0.7)
 ax.axhline(B_PLUS_LIMIT, color='purple', ls='--', label=f'B+ Limit ({B_PLUS_LIMIT}V)')
