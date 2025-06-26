@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.optimize import curve_fit
+from scipy.optimize import minimize
 
 # --- 1. Data Loading and Preparation ---
 
@@ -30,101 +30,127 @@ vp_target = vp_orig.copy()
 vp_target[vg_orig <= CLAMP_LOW_VG] = CLAMP_HIGH_VP
 vp_target[vg_orig >= CLAMP_HIGH_VG] = CLAMP_LOW_VP
 
-# Define segment boundaries
-b1 = CLAMP_LOW_VG  # -8.0V
-b2 = -1.0
-b3 = 1.0
-b4 = CLAMP_HIGH_VG # 17.62846V
+# Define segment boundaries and overlap for smoother fitting
+b_seg1_end = -1.0
+b_seg2_end = 1.0
+overlap = 0.5  # Use 0.5V of overlap on each side of a segment for fitting
 
-# Filter data for each segment from the target curve
-seg1_mask = (vg_orig >= b1) & (vg_orig <= b2)
+# --- 3. Constrained Polynomial Fitting with scipy.optimize.minimize ---
+
+# Helper functions for the optimizer
+def poly_func(p, x):
+    """Calculates polynomial value. p are coefficients, highest power first."""
+    return np.polyval(p, x)
+
+def poly_deriv_func(p, x):
+    """Calculates polynomial derivative value."""
+    deriv_p = np.polyder(p)
+    return np.polyval(deriv_p, x)
+
+def objective_func(p, x, y):
+    """Objective function to minimize: Sum of Squared Errors."""
+    return np.sum((poly_func(p, x) - y)**2)
+
+print("--- Starting Constrained Optimization ---")
+
+# == Segment 1: Cut-off Knee (Vg <= -1.0) ==
+# Degree: 4 (5 coefficients). Constraints: 3. DoF: 2.
+poly1_deg = 4
+p0_1 = np.zeros(poly1_deg + 1)
+seg1_mask = (vg_orig >= CLAMP_LOW_VG) & (vg_orig <= b_seg1_end + overlap)
 vg_seg1, vp_seg1 = vg_orig[seg1_mask], vp_target[seg1_mask]
 
-seg2_mask = (vg_orig >= b2) & (vg_orig <= b3)
+# Constraints:
+# 1. Value at Vg=-8.0 must be 405V
+# 2. Derivative at Vg=-8.0 must be 0 (tangent)
+# 3. Value at the specified constraint point
+constraints1 = [
+    {'type': 'eq', 'fun': lambda p: poly_func(p, CLAMP_LOW_VG) - CLAMP_HIGH_VP},
+    {'type': 'eq', 'fun': lambda p: poly_deriv_func(p, CLAMP_LOW_VG) - 0.0},
+    {'type': 'eq', 'fun': lambda p: poly_func(p, -5.340293) - 400.6191}
+]
+
+res1 = minimize(objective_func, p0_1, args=(vg_seg1, vp_seg1),
+                method='SLSQP', constraints=constraints1)
+poly1 = np.poly1d(res1.x)
+print(f"Segment 1 Fit Success: {res1.success} ({res1.message})")
+
+
+# == Segment 2: Critical Region (-1.0 to 1.0) ==
+# Must connect smoothly to Segment 1 at Vg = -1.0
+val_at_join1 = poly1(b_seg1_end)
+deriv_at_join1 = np.polyder(poly1)(b_seg1_end)
+
+# Degree: 5 (6 coefficients). Constraints: 2. DoF: 4.
+poly2_deg = 5
+p0_2 = np.zeros(poly2_deg + 1)
+seg2_mask = (vg_orig >= b_seg1_end - overlap) & (vg_orig <= b_seg2_end + overlap)
 vg_seg2, vp_seg2 = vg_orig[seg2_mask], vp_target[seg2_mask]
 
-seg3_mask = (vg_orig >= b3) & (vg_orig <= b4)
+# Constraints:
+# 1. Value at Vg=-1.0 must match end of poly1 (C0 continuity)
+# 2. Derivative at Vg=-1.0 must match end of poly1 (C1 continuity)
+constraints2 = [
+    {'type': 'eq', 'fun': lambda p: poly_func(p, b_seg1_end) - val_at_join1},
+    {'type': 'eq', 'fun': lambda p: poly_deriv_func(p, b_seg1_end) - deriv_at_join1}
+]
+
+res2 = minimize(objective_func, p0_2, args=(vg_seg2, vp_seg2),
+                method='SLSQP', constraints=constraints2)
+poly2 = np.poly1d(res2.x)
+print(f"Segment 2 Fit Success: {res2.success} ({res2.message})")
+
+
+# == Segment 3: Saturation Knee (Vg >= 1.0) ==
+# Must connect smoothly to Segment 2 at Vg = 1.0
+val_at_join2 = poly2(b_seg2_end)
+deriv_at_join2 = np.polyder(poly2)(b_seg2_end)
+
+# Degree: 6 (7 coefficients). Constraints: 5. DoF: 2.
+poly3_deg = 6
+p0_3 = np.zeros(poly3_deg + 1)
+seg3_mask = (vg_orig >= b_seg2_end - overlap) & (vg_orig <= CLAMP_HIGH_VG)
 vg_seg3, vp_seg3 = vg_orig[seg3_mask], vp_target[seg3_mask]
 
+# Constraints:
+# 1. Value at Vg=1.0 must match end of poly2 (C0)
+# 2. Derivative at Vg=1.0 must match end of poly2 (C1)
+# 3. Value at the specified constraint point
+# 4. Value at Vg=17.6... must be clamp value
+# 5. Derivative at Vg=17.6... must be 0 (tangent)
+constraints3 = [
+    {'type': 'eq', 'fun': lambda p: poly_func(p, b_seg2_end) - val_at_join2},
+    {'type': 'eq', 'fun': lambda p: poly_deriv_func(p, b_seg2_end) - deriv_at_join2},
+    {'type': 'eq', 'fun': lambda p: poly_func(p, 5.253457) - 37.7934},
+    {'type': 'eq', 'fun': lambda p: poly_func(p, CLAMP_HIGH_VG) - CLAMP_LOW_VP},
+    {'type': 'eq', 'fun': lambda p: poly_deriv_func(p, CLAMP_HIGH_VG) - 0.0}
+]
 
-# --- 3. Constrained Polynomial Fitting ---
+res3 = minimize(objective_func, p0_3, args=(vg_seg3, vp_seg3),
+                method='SLSQP', constraints=constraints3, options={'maxiter': 500})
+poly3 = np.poly1d(res3.x)
+print(f"Segment 3 Fit Success: {res3.success} ({res3.message})")
 
-# Constraint points from the prompt
-p1_constraint = (-5.340293, 400.6191)
-p3_given_constraint = (5.253457, 37.7934)
 
-# == Segment 1: Cut-off Knee (-8V to -1V) ==
-# Polynomial P(x) = (x - xc) * (a*x^2 + b*x + c) + yc
-# This forces P(xc) = yc. We fit for a, b, c.
-def constrained_poly_1(x, a, b, c):
-    xc, yc = p1_constraint
-    return (x - xc) * (a * x**2 + b * x + c) + yc
-
-popt1, _ = curve_fit(constrained_poly_1, vg_seg1, vp_seg1)
-a1, b1_fit, c1 = popt1
-poly1 = np.poly1d(np.polyadd(np.polymul([a1, b1_fit, c1], [1, -p1_constraint[0]]), [0, 0, 0, p1_constraint[1]]))
-
-# == Segment 2: Critical Region (-1V to +1V) ==
-# Ensure continuity: The start of poly2 must match the end of poly1
-p2_constraint = (b2, poly1(b2))
-
-# Using a higher degree (5th) for better fit in the critical region
-# P(x) = (x - xc) * (a*x^4 + b*x^3 + c*x^2 + d*x + e) + yc
-def constrained_poly_2(x, a, b, c, d, e):
-    xc, yc = p2_constraint
-    return (x - xc) * (a * x**4 + b * x**3 + c * x**2 + d * x + e) + yc
-
-popt2, _ = curve_fit(constrained_poly_2, vg_seg2, vp_seg2, maxfev=10000)
-a2, b2_fit, c2, d2, e2 = popt2
-poly2 = np.poly1d(np.polyadd(np.polymul([a2, b2_fit, c2, d2, e2], [1, -p2_constraint[0]]), [0, 0, 0, 0, 0, p2_constraint[1]]))
-
-# == Segment 3: Saturation Knee (+1V to +17.6V) ==
-# This segment has TWO constraints:
-# 1. Continuity with Segment 2: (b3, poly2(b3))
-# 2. The point given in the prompt.
-p3_constraint1 = (b3, poly2(b3))
-p3_constraint2 = p3_given_constraint
-
-# Define the line L(x) that passes through the two constraint points
-x1, y1 = p3_constraint1
-x2, y2 = p3_constraint2
-line_slope = (y2 - y1) / (x2 - x1)
-line_intercept = y1 - line_slope * x1
-line_poly = np.poly1d([line_slope, line_intercept])
-
-# P(x) = (x - x1)*(x - x2)*(a*x^2 + b*x + c) + L(x)
-# This forces P(x1)=y1 and P(x2)=y2. We fit for a, b, c.
-def constrained_poly_3(x, a, b, c):
-    # R(x) is a 2nd degree polynomial, so P(x) is 4th degree
-    r_poly = a * x**2 + b * x + c
-    return (x - x1) * (x - x2) * r_poly + line_poly(x)
-
-popt3, _ = curve_fit(constrained_poly_3, vg_seg3, vp_seg3, maxfev=10000)
-a3, b3_fit, c3 = popt3
-r_poly3 = np.poly1d([a3, b3_fit, c3])
-poly3 = np.polyadd(np.polymul(r_poly3, [1, -(x1 + x2), x1 * x2]), line_poly)
-
-print("--- Polynomial Coefficients (highest power first) ---")
+print("\n--- Polynomial Coefficients (highest power first) ---")
 print(f"Segment 1 (Cut-off, Vg in [-8.0, -1.0]):\n{poly1}\n")
 print(f"Segment 2 (Critical, Vg in [-1.0, 1.0]):\n{poly2}\n")
 print(f"Segment 3 (Saturation, Vg in [1.0, 17.6]):\n{poly3}\n")
 
-
 # --- 4. Final Model Construction and Verification ---
 
 def model_vp(vg):
-    """Applies the piecewise polynomial model to a Vg value or array."""
     vg = np.asarray(vg)
     vp = np.zeros_like(vg, dtype=float)
 
-    # Apply clamping and polynomials based on Vg value
     conds = [
-        vg <= b1,
-        (vg > b1) & (vg <= b2),
-        (vg > b2) & (vg <= b3),
-        (vg > b3) & (vg <= b4),
-        vg > b4
+        vg <= CLAMP_LOW_VG,
+        (vg > CLAMP_LOW_VG) & (vg <= b_seg1_end),
+        (vg > b_seg1_end) & (vg <= b_seg2_end),
+        (vg > b_seg2_end) & (vg <= CLAMP_HIGH_VG),
+        vg > CLAMP_HIGH_VG
     ]
+    # Note the change in boundary names
     funcs = [
         lambda x: CLAMP_HIGH_VP,
         lambda x: poly1(x),
@@ -134,51 +160,51 @@ def model_vp(vg):
     ]
     
     for cond, func in zip(conds, funcs):
-        vp[cond] = func(vg[cond])
-
-    # Final check on the physical B+ limit
-    vp[vp > CLAMP_HIGH_VP] = CLAMP_HIGH_VP
-
+        # Clip the polynomial outputs just in case of numerical instability
+        if func in [lambda x: poly1(x), lambda x: poly2(x), lambda x: poly3(x)]:
+             vp[cond] = np.clip(func(vg[cond]), CLAMP_LOW_VP, CLAMP_HIGH_VP)
+        else:
+             vp[cond] = func(vg[cond])
+             
     return vp
 
-# Generate data for plotting the model
 vg_model_fine = np.linspace(-24, 24, 2000)
 vp_model_fine = model_vp(vg_model_fine)
 
-# Calculate error within the fitted range
-fit_range_mask = (vg_orig >= b1) & (vg_orig <= b4)
+fit_range_mask = (vg_orig >= CLAMP_LOW_VG) & (vg_orig <= CLAMP_HIGH_VG)
 vg_fit_range = vg_orig[fit_range_mask]
 vp_target_fit_range = vp_target[fit_range_mask]
 vp_model_fit_range = model_vp(vg_fit_range)
-
 error = vp_model_fit_range - vp_target_fit_range
-
 
 # --- 5. Visualization ---
 
 plt.style.use('seaborn-v0_8-whitegrid')
-
-# Plot 1: Main Curve Fit
 fig1, ax1 = plt.subplots(figsize=(16, 9))
 
-# Plot the raw and target data
+# Plot data
 ax1.plot(vg_orig, vp_orig, 'o', color='lightgray', markersize=4, label='Original SPICE Data')
-ax1.plot(vg_orig, vp_target, '-', color='royalblue', linewidth=2.5, label='Target Curve (with Clamping)')
+ax1.plot(vg_orig, vp_target, '-', color='royalblue', linewidth=3, alpha=0.6, label='Target Curve (with Clamping)')
+ax1.plot(vg_model_fine, vp_model_fine, '--', color='red', linewidth=2.5, label='C1-Continuous Polynomial Model')
 
-# Plot the piecewise polynomial model
-ax1.plot(vg_model_fine, vp_model_fine, '--', color='red', linewidth=2, label='Piecewise Polynomial Model')
+# Mark boundaries and constraints
+ax1.axvline(x=CLAMP_LOW_VG, color='k', linestyle=':', label='Segment/Clamp Boundaries')
+ax1.axvline(x=b_seg1_end, color='k', linestyle=':')
+ax1.axvline(x=b_seg2_end, color='k', linestyle=':')
+ax1.axvline(x=CLAMP_HIGH_VG, color='k', linestyle=':')
+ax1.plot(-5.340293, 400.6191, 'X', color='darkorange', markersize=12, mew=2, label='Constraint Point (Cut-off)')
+ax1.plot(5.253457, 37.7934, 'P', color='purple', markersize=12, mew=2, label='Constraint Point (Saturation)')
 
-# Mark segment boundaries
-ax1.axvline(x=b1, color='k', linestyle=':', label='Segment Boundaries')
-ax1.axvline(x=b2, color='k', linestyle=':')
-ax1.axvline(x=b3, color='k', linestyle=':')
-ax1.axvline(x=b4, color='k', linestyle=':')
+# Add annotations for tangency points
+ax1.annotate('Tangent to 405V', xy=(CLAMP_LOW_VG, CLAMP_HIGH_VP), xytext=(-15, 380),
+             arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=8),
+             fontsize=12, ha='center')
+ax1.annotate(f'Tangent to {CLAMP_LOW_VP:.2f}V', xy=(CLAMP_HIGH_VG, CLAMP_LOW_VP), xytext=(12, 50),
+             arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=8),
+             fontsize=12, ha='center')
 
-# Mark constraint points
-ax1.plot(*p1_constraint, 'X', color='darkorange', markersize=10, mew=2, label='Constraint Point (Cut-off)')
-ax1.plot(*p3_given_constraint, 'P', color='purple', markersize=10, mew=2, label='Constraint Point (Saturation)')
 
-ax1.set_title('12AX7 Triode Model: Vp vs. Vg with Piecewise Polynomial Fit', fontsize=16)
+ax1.set_title('12AX7 Triode Model: Vp vs. Vg with C1-Continuous Piecewise Polynomial Fit', fontsize=16)
 ax1.set_xlabel('Grid Voltage (Vg) [V]', fontsize=12)
 ax1.set_ylabel('Plate Voltage (Vp) [V]', fontsize=12)
 ax1.legend(fontsize=11)
@@ -189,22 +215,16 @@ ax1.grid(True, which='both')
 plt.tight_layout()
 plt.show()
 
-
 # Plot 2: Error Analysis
 fig2, ax2 = plt.subplots(figsize=(16, 9))
-
 ax2.plot(vg_fit_range, error, 'o', color='crimson', markersize=5, label='Model Error')
-
-# Plot tolerance bands
 ax2.axhline(y=0.25, color='green', linestyle='--', label='Tolerance (+/- 0.25V)')
 ax2.axhline(y=-0.25, color='green', linestyle='--')
 ax2.axhline(y=0, color='black', linestyle='-', linewidth=0.7)
-
-
 ax2.set_title('Model Error (Polynomial Model vs. Target Curve)', fontsize=16)
 ax2.set_xlabel('Grid Voltage (Vg) [V]', fontsize=12)
 ax2.set_ylabel('Error (Vp_model - Vp_target) [V]', fontsize=12)
-ax2.set_xlim(b1, b4)
+ax2.set_xlim(CLAMP_LOW_VG, CLAMP_HIGH_VG)
 ax2.set_ylim(-0.3, 0.3)
 ax2.legend(fontsize=11)
 ax2.grid(True, which='both')
@@ -216,7 +236,6 @@ if np.all(np.abs(error) <= 0.25):
     print("Success: All points are within the +/- 0.25V tolerance.")
 else:
     print("Warning: Some points exceed the +/- 0.25V tolerance.")
-
 
 plt.tight_layout()
 plt.show()
