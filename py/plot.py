@@ -19,61 +19,77 @@ sat_shoulder_vg = 4.53
 b = boundaries = [-8.0, -1.0, 1.0, sat_shoulder_vg, 15.68266]
 poly_deg = 4
 B_PLUS_LIMIT = 405.0
-ERROR_TOLERANCE = 0.5 # The requested +/- 0.5V limit
+ERROR_TOLERANCE = 0.5
 
 # --- 3. Master Spline ---
 spline_mask = (Vg_data >= -12.0) & (Vg_data <= b[-1])
 tck = splrep(Vg_data[spline_mask], Vp_data[spline_mask], s=0.5)
 
 def objective_func(c, vg, vp): return np.sum((np.polyval(c, vg) - vp)**2)
-all_coeffs = [None] * len(b)
-polys = [None] * len(b)
+all_coeffs = [None] * (len(b) - 1)
+polys = [None] * (len(b) - 1)
 
-# --- 4. Independent, Constrained Fit for each Segment ---
-for i in range(len(b) - 1):
-    start, end = b[i], b[i+1]
-    
-    # Use a wider fitting range for the first segment for better smoothness
-    fit_start = start if i > 0 else -12.0
+# --- 4. Sequential, Daisy-Chained Constrained Fit ---
+
+# Stage 1: Fit Segment 2 (Central Bridge) first
+i=1
+start, end = b[i], b[i+1]
+vg_fit = np.linspace(start, end, 200)
+vp_target = splev(vg_fit, tck)
+constraints = [
+    {'type': 'eq', 'fun': lambda c: np.polyval(c, start) - splev(start, tck)},
+    {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), start) - splev(start, tck, der=1)},
+    {'type': 'eq', 'fun': lambda c: np.polyval(c, end) - splev(end, tck)},
+    {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), end) - splev(end, tck, der=1)}
+]
+all_coeffs[i] = minimize(objective_func, np.polyfit(vg_fit, vp_target, poly_deg), args=(vg_fit, vp_target), method='SLSQP', constraints=constraints).x
+polys[i] = np.poly1d(all_coeffs[i])
+
+# Stage 2: Fit remaining segments, chaining to the previous one
+for i in [2, 3, 0]: # Order: S3, S4, then S1
+    if i == 0: # Segment 1 (Knee)
+        start, end = b[i], b[i+1]
+        fit_start = -12.0
+        p_next = polys[i+1]
+        constraints = [
+            {'type': 'eq', 'fun': lambda c: np.polyval(c, end) - p_next(end)},
+            {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), end) - p_next.deriv(1)(end)},
+            {'type': 'eq', 'fun': lambda c: np.polyval(c, start) - splev(start, tck)},
+        ]
+        vg_dense_op = np.linspace(start, end, 100)
+        vp_target_op = splev(vg_dense_op, tck)
+        constraints.append({'type': 'ineq', 'fun': lambda c: (vp_target_op + ERROR_TOLERANCE) - np.polyval(c, vg_dense_op)})
+        constraints.append({'type': 'ineq', 'fun': lambda c: np.polyval(c, vg_dense_op) - (vp_target_op - ERROR_TOLERANCE)})
+        
+        # --- Foolproof B+ Check ---
+        def robust_b_plus_check(coeffs, seg_start, seg_end):
+            p_deriv_roots = np.roots(np.polyder(coeffs, 1))
+            extrema_candidates = np.concatenate(([seg_start, seg_end], p_deriv_roots[np.isreal(p_deriv_roots)].real))
+            valid_extrema_vg = extrema_candidates[(extrema_candidates >= seg_start) & (extrema_candidates <= seg_end)]
+            return B_PLUS_LIMIT - np.max(np.polyval(coeffs, valid_extrema_vg))
+        constraints.append({'type': 'ineq', 'fun': lambda c: robust_b_plus_check(c, fit_start, end)})
+    else: # Segments 3 and 4
+        start, end = b[i], b[i+1]
+        fit_start = start
+        p_prev = polys[i-1]
+        constraints = [
+            {'type': 'eq', 'fun': lambda c: np.polyval(c, start) - p_prev(start)},
+            {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), start) - p_prev.deriv(1)(start)},
+            {'type': 'eq', 'fun': lambda c: np.polyval(c, end) - splev(end, tck)},
+        ]
+        if i == 3: # Add zero-slope constraint for the final segment
+             constraints.append({'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), end)})
+        else:
+             constraints.append({'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), end) - splev(end, tck, der=1)})
+
     vg_fit = np.linspace(fit_start, end, 200)
     vp_target = splev(vg_fit, tck)
-
-    constraints = [
-        {'type': 'eq', 'fun': lambda c, s=start: np.polyval(c, s) - splev(s, tck)},
-        {'type': 'eq', 'fun': lambda c, s=start: np.polyval(np.polyder(c, 1), s) - splev(s, tck, der=1)},
-        {'type': 'eq', 'fun': lambda c, e=end: np.polyval(c, e) - splev(e, tck)},
-        {'type': 'eq', 'fun': lambda c, e=end: np.polyval(np.polyder(c, 1), e) - splev(e, tck, der=1)}
-    ]
-    
-    # Add special constraints for the first segment (knee)
-    if i == 0:
-        # 1. B+ Limit Constraint
-        def robust_b_plus_check(coeffs):
-            p_deriv_roots = np.roots(np.polyder(coeffs, 1))
-            real_extrema_vg = p_deriv_roots[np.isreal(p_deriv_roots)].real
-            valid_extrema_vg = real_extrema_vg[(real_extrema_vg >= fit_start) & (real_extrema_vg <= end)]
-            if len(valid_extrema_vg) == 0: return B_PLUS_LIMIT
-            return B_PLUS_LIMIT - np.max(np.polyval(coeffs, valid_extrema_vg))
-        constraints.append({'type': 'ineq', 'fun': robust_b_plus_check})
-
-        # 2. Tolerance Band Constraint
-        vg_dense_op = np.linspace(start, end, 100) # Grid inside operational range
-        vp_target_op = splev(vg_dense_op, tck)
-        # P(x) <= V_target(x) + 0.5  =>  V_target + 0.5 - P(x) >= 0
-        constraints.append({'type': 'ineq', 'fun': lambda c: (vp_target_op + ERROR_TOLERANCE) - np.polyval(c, vg_dense_op)})
-        # P(x) >= V_target(x) - 0.5  =>  P(x) - (V_target - 0.5) >= 0
-        constraints.append({'type': 'ineq', 'fun': lambda c: np.polyval(c, vg_dense_op) - (vp_target_op - ERROR_TOLERANCE)})
-
-    # Fit the polynomial
-    initial_guess = np.polyfit(vg_fit, vp_target, poly_deg)
-    res = minimize(objective_func, initial_guess, args=(vg_fit, vp_target), method='SLSQP', constraints=constraints)
-    all_coeffs[i] = res.x
-    polys[i] = np.poly1d(res.x)
+    all_coeffs[i] = minimize(objective_func, np.polyfit(vg_fit, vp_target, poly_deg), args=(vg_fit, vp_target), method='SLSQP', constraints=constraints).x
+    polys[i] = np.poly1d(all_coeffs[i])
 
 # --- 5. Assemble Final Model ---
 V_clamp_low = polys[0](b[0])
-V_clamp_high = polys[-2](b[-1])
-
+V_clamp_high = polys[-1](b[-1])
 def model_12ax7(vg_in):
     vg = np.asarray(vg_in, dtype=float)
     vp_out = np.zeros_like(vg)
@@ -85,7 +101,7 @@ def model_12ax7(vg_in):
     return vp_out
 
 # --- 6. Plot for Verification ---
-fig, axes = plt.subplots(2, 1, figsize=(16, 9), gridspec_kw={'height_ratios': [1, 1]})
+fig, axes = plt.subplots(2, 1, figsize=(15, 12), gridspec_kw={'height_ratios': [1, 1]})
 ax1, ax2 = axes
 vg_plot_range = np.linspace(-12, 18, 2000)
 ax1.plot(Vg_data, Vp_data, 'o', ms=3, label='SPICE Data', color='gray', alpha=0.6)
@@ -94,24 +110,29 @@ for bound in b: ax1.axvline(bound, color='k', ls=':', alpha=0.7)
 ax1.set(ylabel='Plate Voltage (Vp)', title='Definitive 12AX7 Model - Final', xlim=(-12, 18))
 ax1.legend(loc='lower left'), ax1.grid(True)
 
-# Zoomed-in plot of the knee with the tolerance band
 vg_knee_range = np.linspace(b[0], b[1], 200)
 vp_true_knee = splev(vg_knee_range, tck)
 ax2.plot(Vg_data, Vp_data, 'o', ms=5, label='SPICE Data', color='gray', alpha=0.5)
 ax2.plot(vg_knee_range, polys[0](vg_knee_range), 'r-', lw=2.5, label='Fitted Polynomial')
 ax2.fill_between(vg_knee_range, vp_true_knee - ERROR_TOLERANCE, vp_true_knee + ERROR_TOLERANCE,
                  color='green', alpha=0.3, label=f'±{ERROR_TOLERANCE}V Tolerance Band')
-ax2.set(xlim=(b[0], b[1]), ylim=(250, 410), title='Zoomed View: Knee Polynomial within Tolerance Band',
+ax2.axhline(B_PLUS_LIMIT, color='purple', ls='--', label='B+ Limit')
+ax2.set(xlim=(b[0], b[1]), ylim=(250, 406), title='Zoomed View: Knee is B+ Safe and within Tolerance',
         xlabel='Grid Voltage (Vg)', ylabel='Plate Voltage (Vp)')
 ax2.legend(), ax2.grid(True)
 plt.tight_layout()
 plt.show()
 
-# --- 7. Final Error Verification ---
+# --- 7. Final Verification Checks ---
+print("--- Final Boundary Continuity Check (Value & Slope) ---")
+for i in range(1, len(b)-1):
+    bound = b[i]
+    p_left, p_right = polys[i-1], polys[i]
+    print(f"\nAt Boundary Vg = {bound:.2f}V:")
+    print(f"  Vp (Left): {p_left(bound):.4f} V  | Vp (Right): {p_right(bound):.4f} V  -> Match: {np.isclose(p_left(bound), p_right(bound))}")
+    print(f"  Gain (Left): {p_left.deriv(1)(bound):.4f} | Gain (Right): {p_right.deriv(1)(bound):.4f} -> Match: {np.isclose(p_left.deriv(1)(bound), p_right.deriv(1)(bound))}")
 max_error = np.max(np.abs(polys[0](vg_knee_range) - vp_true_knee))
-print(f"\n--- Final Error Check for Segment 1 ---")
-print(f"Maximum error in the knee segment: {max_error:.4f} V")
-print(f"This is within the required tolerance of {ERROR_TOLERANCE:.4f} V.")
+print(f"\nMaximum error in the knee segment: {max_error:.4f} V (Required: <= {ERROR_TOLERANCE:.1f} V)")
 
 # --- 8. Print Coefficients ---
 print("\n--- Definitive, Final Polynomial Coefficients (4th-Degree) ---")
