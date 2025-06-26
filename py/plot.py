@@ -23,28 +23,33 @@ B_PLUS_LIMIT = 405.0
 spline_mask = (Vg_data >= -12.0) & (Vg_data <= b[-1])
 tck = splrep(Vg_data[spline_mask], Vp_data[spline_mask], s=0.5)
 
-res = minimize_scalar(lambda x: splev(x, tck, der=1), bounds=(-8, -2), method='bounded')
-knee_vg = res.x
-knee_vp = splev(knee_vg, tck)
-print(f"Identified Knee Pinning Point: Vg={knee_vg:.4f}V, Vp={knee_vp:.4f}V")
+# Find Vg for the "cutoff knee"
+res_cutoff_knee = minimize_scalar(lambda x: splev(x, tck, der=1), bounds=(-8, -2), method='bounded')
+cutoff_knee_vg, cutoff_knee_vp = res_cutoff_knee.x, splev(res_cutoff_knee.x, tck)
+
+# Find Vg for the "saturation shoulder" (point of max curvature)
+res_sat_knee = minimize_scalar(lambda x: -splev(x, tck, der=2), bounds=(1, 10), method='bounded')
+sat_knee_vg, sat_knee_vp = res_sat_knee.x, splev(res_sat_knee.x, tck)
+
+print(f"Cutoff Knee Pin: Vg={cutoff_knee_vg:.4f}, Vp={cutoff_knee_vp:.4f}")
+print(f"Saturation Shoulder Pin: Vg={sat_knee_vg:.4f}, Vp={sat_knee_vp:.4f}")
 
 def objective_func(c, vg, vp): return np.sum((np.polyval(c, vg) - vp)**2)
 all_coeffs = [None] * 3
 
-# --- 4. Stage 1: Fit Segment 3 (Saturation, C1-Constrained) ---
+# --- 4. Stage 1: Fit Segment 3 (Saturation) ---
 s3_start, s3_end = b[2], b[3]
 vg_s3_fit = np.linspace(s3_start, s3_end, 200)
 vp_s3_target = splev(vg_s3_fit, tck)
-
-# --- CHANGE: Relax C2 constraint to eliminate ripple ---
 s3_constraints = [
-    {'type': 'eq', 'fun': lambda c: np.polyval(c, s3_start) - splev(s3_start, tck)},       # C0
-    {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), s3_start) - splev(s3_start, tck, der=1)}, # C1
+    {'type': 'eq', 'fun': lambda c: np.polyval(c, s3_start) - splev(s3_start, tck)},
+    {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), s3_start) - splev(s3_start, tck, der=1)},
+    {'type': 'eq', 'fun': lambda c: np.polyval(c, sat_knee_vg) - sat_knee_vp}, # Pin at saturation shoulder
     {'type': 'eq', 'fun': lambda c: np.polyval(c, s3_end) - splev(s3_end, tck)},
     {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), s3_end)}
 ]
 s3_res = minimize(objective_func, np.polyfit(vg_s3_fit, vp_s3_target, poly_deg), args=(vg_s3_fit, vp_s3_target),
-                  method='SLSQP', constraints=s3_constraints, options={'maxiter': 1000})
+                  method='SLSQP', constraints=s3_constraints)
 all_coeffs[2] = s3_res.x
 p3 = np.poly1d(all_coeffs[2])
 
@@ -52,35 +57,45 @@ p3 = np.poly1d(all_coeffs[2])
 s2_start, s2_end = b[1], b[2]
 vg_s2_fit = np.linspace(s2_start, s2_end, 200)
 vp_s2_target = splev(vg_s2_fit, tck)
-
 s2_constraints = [
     {'type': 'eq', 'fun': lambda c: np.polyval(c, s2_start) - splev(s2_start, tck)},
     {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), s2_start) - splev(s2_start, tck, der=1)},
     {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 2), s2_start) - splev(s2_start, tck, der=2)},
-    {'type': 'eq', 'fun': lambda c: np.polyval(c, s2_end) - p3(s2_end)}, # Match new S3
+    {'type': 'eq', 'fun': lambda c: np.polyval(c, s2_end) - p3(s2_end)},
     {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), s2_end) - p3.deriv(1)(s2_end)}
 ]
 s2_res = minimize(objective_func, np.polyfit(vg_s2_fit, vp_s2_target, poly_deg), args=(vg_s2_fit, vp_s2_target),
-                  method='SLSQP', constraints=s2_constraints, options={'maxiter': 1000})
+                  method='SLSQP', constraints=s2_constraints)
 all_coeffs[1] = s2_res.x
 p2 = np.poly1d(all_coeffs[1])
 
 # --- 6. Stage 3: Fit Segment 1 (Knee) ---
-s1_start, s1_end = -12.0, b[1]
-# --- FIX: Use a much denser grid for B+ limit check ---
-vg_s1_fit = np.linspace(s1_start, s1_end, 1000)
+s1_start_fit, s1_end_fit = -12.0, b[1]
+vg_s1_fit = np.linspace(s1_start_fit, s1_end_fit, 200)
 vp_s1_target = splev(vg_s1_fit, tck)
 
+# --- Definitive B+ Constraint Function ---
+def robust_b_plus_check(coeffs):
+    p_deriv = np.polyder(coeffs, 1)
+    extrema_candidates = np.roots(p_deriv)
+    # Filter for real roots within the segment
+    real_extrema_vg = extrema_candidates[np.isreal(extrema_candidates)].real
+    valid_extrema_vg = real_extrema_vg[(real_extrema_vg >= s1_start_fit) & (real_extrema_vg <= s1_end_fit)]
+    if len(valid_extrema_vg) > 0:
+        max_val = np.max(np.polyval(coeffs, valid_extrema_vg))
+        return B_PLUS_LIMIT - max_val
+    return B_PLUS_LIMIT # No local maxima in range, constraint is met
+
 s1_constraints = [
-    {'type': 'eq', 'fun': lambda c: np.polyval(c, s1_end) - p2(s1_end)},
-    {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), s1_end) - p2.deriv(1)(s1_end)},
-    {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 2), s1_end) - p2.deriv(2)(s1_end)},
+    {'type': 'eq', 'fun': lambda c: np.polyval(c, s1_end_fit) - p2(s1_end_fit)},
+    {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), s1_end_fit) - p2.deriv(1)(s1_end_fit)},
+    {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 2), s1_end_fit) - p2.deriv(2)(s1_end_fit)},
     {'type': 'eq', 'fun': lambda c: np.polyval(c, b[0]) - splev(b[0], tck)},
-    {'type': 'eq', 'fun': lambda c: np.polyval(c, knee_vg) - knee_vp},
-    {'type': 'ineq', 'fun': lambda c: B_PLUS_LIMIT - np.polyval(c, vg_s1_fit)}
+    {'type': 'eq', 'fun': lambda c: np.polyval(c, cutoff_knee_vg) - cutoff_knee_vp},
+    {'type': 'ineq', 'fun': robust_b_plus_check}
 ]
 s1_res = minimize(objective_func, np.polyfit(vg_s1_fit, vp_s1_target, poly_deg), args=(vg_s1_fit, vp_s1_target),
-                  method='SLSQP', constraints=s1_constraints, options={'maxiter': 1000})
+                  method='SLSQP', constraints=s1_constraints)
 all_coeffs[0] = s1_res.x
 p1 = np.poly1d(all_coeffs[0])
 
@@ -99,22 +114,18 @@ def model_12ax7(vg_in):
     return vp_out
 
 # --- 8. Plot for Verification ---
-fig, axes = plt.subplots(2, 1, figsize=(16, 9), gridspec_kw={'height_ratios': [1, 1]})
-ax1, ax2 = axes
-vg_plot_range = np.linspace(-10, 18, 2000)
-ax1.plot(Vg_data, Vp_data, 'o', ms=3, label='SPICE Data', color='gray', alpha=0.6)
-ax1.plot(vg_plot_range, model_12ax7(vg_plot_range), label='Definitive Model', color='red', lw=2.5)
-ax1.plot([b[0], knee_vg], [p1(b[0]), knee_vp], 'x', color='blue', markersize=10, mew=2, label='Pinned Points')
-for bound in b: ax1.axvline(bound, color='k', ls=':', alpha=0.7)
-ax1.set(ylabel='Plate Voltage (Vp)', title='Definitive 12AX7 Model - Fully Constrained & Ripple-Free', xlim=(-10, 18))
-ax1.legend(), ax1.grid(True)
-
-ax2.plot(Vg_data, Vp_data, 'o', ms=4, color='gray', alpha=0.6)
-ax2.plot(vg_plot_range, model_12ax7(vg_plot_range), 'r-', lw=2.5)
-ax2.set(xlim=(0, 18), ylim=(10, 140), title='Zoomed View: Saturation Region is Now Smooth',
-        xlabel='Grid Voltage (Vg)', ylabel='Plate Voltage (Vp)')
-ax2.grid(True)
-plt.tight_layout()
+fig, ax = plt.subplots(figsize=(15, 9))
+vg_plot_range = np.linspace(-12, 18, 2000)
+ax.plot(Vg_data, Vp_data, 'o', ms=3, label='SPICE Data', color='gray', alpha=0.6)
+ax.plot(vg_plot_range, model_12ax7(vg_plot_range), label='Definitive Model', color='red', lw=2.5)
+# Add markers for all pinned points
+pin_vgs = [b[0], cutoff_knee_vg, sat_knee_vg]
+pin_vps = [p1(b[0]), p1(cutoff_knee_vg), p3(sat_knee_vg)]
+ax.plot(pin_vgs, pin_vps, 'x', color='blue', markersize=10, mew=2, label='Pinned Points')
+for bound in b: ax.axvline(bound, color='k', ls=':', alpha=0.7)
+ax.axhline(B_PLUS_LIMIT, color='purple', ls='--', label=f'B+ Limit ({B_PLUS_LIMIT}V)')
+ax.set(ylabel='Plate Voltage (Vp)', title='Definitive 12AX7 Model - Fully Constrained, Pinned, and Ripple-Free', xlim=(-12, 18))
+ax.legend(), ax.grid(True)
 plt.show()
 
 # --- 9. Print Coefficients and Verification Data ---
