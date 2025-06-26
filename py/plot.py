@@ -21,7 +21,7 @@ poly_deg = 4
 B_PLUS_LIMIT = 405.0
 ERROR_TOLERANCE = 0.5
 
-# --- 3. Master Spline ---
+# --- 3. Master Spline for Target Values ---
 spline_mask = (Vg_data >= -12.0) & (Vg_data <= b[-1])
 tck = splrep(Vg_data[spline_mask], Vp_data[spline_mask], s=0.5)
 
@@ -29,10 +29,10 @@ def objective_func(c, vg, vp): return np.sum((np.polyval(c, vg) - vp)**2)
 all_coeffs = [None] * (len(b) - 1)
 polys = [None] * (len(b) - 1)
 
-# --- 4. Sequential, Daisy-Chained Constrained Fit ---
+# --- 4. Definitive Sequential, Daisy-Chained Constrained Fit ---
 
-# Stage 1: Fit Segment 2 (Central Bridge) first
-i=1
+# Stage 1: Fit Segment 4 (Saturation)
+i = 3
 start, end = b[i], b[i+1]
 vg_fit = np.linspace(start, end, 200)
 vp_target = splev(vg_fit, tck)
@@ -40,52 +40,51 @@ constraints = [
     {'type': 'eq', 'fun': lambda c: np.polyval(c, start) - splev(start, tck)},
     {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), start) - splev(start, tck, der=1)},
     {'type': 'eq', 'fun': lambda c: np.polyval(c, end) - splev(end, tck)},
-    {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), end) - splev(end, tck, der=1)}
+    {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), end)} # Zero slope at end
 ]
 all_coeffs[i] = minimize(objective_func, np.polyfit(vg_fit, vp_target, poly_deg), args=(vg_fit, vp_target), method='SLSQP', constraints=constraints).x
 polys[i] = np.poly1d(all_coeffs[i])
 
-# Stage 2: Fit remaining segments, chaining to the previous one
-for i in [2, 3, 0]: # Order: S3, S4, then S1
-    if i == 0: # Segment 1 (Knee)
-        start, end = b[i], b[i+1]
-        fit_start = -12.0
-        p_next = polys[i+1]
-        constraints = [
-            {'type': 'eq', 'fun': lambda c: np.polyval(c, end) - p_next(end)},
-            {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), end) - p_next.deriv(1)(end)},
-            {'type': 'eq', 'fun': lambda c: np.polyval(c, start) - splev(start, tck)},
-        ]
-        vg_dense_op = np.linspace(start, end, 100)
-        vp_target_op = splev(vg_dense_op, tck)
-        constraints.append({'type': 'ineq', 'fun': lambda c: (vp_target_op + ERROR_TOLERANCE) - np.polyval(c, vg_dense_op)})
-        constraints.append({'type': 'ineq', 'fun': lambda c: np.polyval(c, vg_dense_op) - (vp_target_op - ERROR_TOLERANCE)})
-        
-        # --- Foolproof B+ Check ---
-        def robust_b_plus_check(coeffs, seg_start, seg_end):
-            p_deriv_roots = np.roots(np.polyder(coeffs, 1))
-            extrema_candidates = np.concatenate(([seg_start, seg_end], p_deriv_roots[np.isreal(p_deriv_roots)].real))
-            valid_extrema_vg = extrema_candidates[(extrema_candidates >= seg_start) & (extrema_candidates <= seg_end)]
-            return B_PLUS_LIMIT - np.max(np.polyval(coeffs, valid_extrema_vg))
-        constraints.append({'type': 'ineq', 'fun': lambda c: robust_b_plus_check(c, fit_start, end)})
-    else: # Segments 3 and 4
-        start, end = b[i], b[i+1]
-        fit_start = start
-        p_prev = polys[i-1]
-        constraints = [
-            {'type': 'eq', 'fun': lambda c: np.polyval(c, start) - p_prev(start)},
-            {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), start) - p_prev.deriv(1)(start)},
-            {'type': 'eq', 'fun': lambda c: np.polyval(c, end) - splev(end, tck)},
-        ]
-        if i == 3: # Add zero-slope constraint for the final segment
-             constraints.append({'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), end)})
-        else:
-             constraints.append({'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), end) - splev(end, tck, der=1)})
-
-    vg_fit = np.linspace(fit_start, end, 200)
+# Stage 2 & 3: Fit Segments 3 and 2, chaining backwards
+for i in [2, 1]:
+    start, end = b[i], b[i+1]
+    p_next = polys[i+1] # The previously calculated polynomial
+    vg_fit = np.linspace(start, end, 200)
     vp_target = splev(vg_fit, tck)
+    constraints = [
+        {'type': 'eq', 'fun': lambda c: np.polyval(c, start) - splev(start, tck)},
+        {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), start) - splev(start, tck, der=1)},
+        {'type': 'eq', 'fun': lambda c: np.polyval(c, end) - p_next(end)}, # Match next segment
+        {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), end) - p_next.deriv(1)(end)}
+    ]
     all_coeffs[i] = minimize(objective_func, np.polyfit(vg_fit, vp_target, poly_deg), args=(vg_fit, vp_target), method='SLSQP', constraints=constraints).x
     polys[i] = np.poly1d(all_coeffs[i])
+
+# Stage 4: Fit Segment 1 (Knee), chaining to Segment 2
+i = 0
+start, end = b[i], b[i+1]
+fit_start, fit_end = -12.0, end # Use wider fitting range
+p_next = polys[i+1]
+def robust_b_plus_check(coeffs):
+    p_deriv_roots = np.roots(np.polyder(coeffs, 1))
+    # Check endpoints and real extrema within the operational range of the segment
+    check_points = np.concatenate(([start, end], p_deriv_roots[np.isreal(p_deriv_roots)].real))
+    valid_check_points = check_points[(check_points >= start) & (check_points <= end)]
+    return B_PLUS_LIMIT - np.max(np.polyval(coeffs, valid_check_points))
+vg_dense_op = np.linspace(start, end, 100)
+vp_target_op = splev(vg_dense_op, tck)
+constraints = [
+    {'type': 'eq', 'fun': lambda c: np.polyval(c, end) - p_next(end)},
+    {'type': 'eq', 'fun': lambda c: np.polyval(np.polyder(c, 1), end) - p_next.deriv(1)(end)},
+    {'type': 'eq', 'fun': lambda c: np.polyval(c, start) - splev(start, tck)}, # Pin start point
+    {'type': 'ineq', 'fun': robust_b_plus_check},
+    {'type': 'ineq', 'fun': lambda c: (vp_target_op + ERROR_TOLERANCE) - np.polyval(c, vg_dense_op)},
+    {'type': 'ineq', 'fun': lambda c: np.polyval(c, vg_dense_op) - (vp_target_op - ERROR_TOLERANCE)}
+]
+vg_fit = np.linspace(fit_start, fit_end, 200)
+vp_target = splev(vg_fit, tck)
+all_coeffs[i] = minimize(objective_func, np.polyfit(vg_fit, vp_target, poly_deg), args=(vg_fit, vp_target), method='SLSQP', constraints=constraints).x
+polys[i] = np.poly1d(all_coeffs[i])
 
 # --- 5. Assemble Final Model ---
 V_clamp_low = polys[0](b[0])
@@ -128,9 +127,11 @@ print("--- Final Boundary Continuity Check (Value & Slope) ---")
 for i in range(1, len(b)-1):
     bound = b[i]
     p_left, p_right = polys[i-1], polys[i]
+    val_match = np.isclose(p_left(bound), p_right(bound))
+    gain_match = np.isclose(p_left.deriv(1)(bound), p_right.deriv(1)(bound))
     print(f"\nAt Boundary Vg = {bound:.2f}V:")
-    print(f"  Vp (Left): {p_left(bound):.4f} V  | Vp (Right): {p_right(bound):.4f} V  -> Match: {np.isclose(p_left(bound), p_right(bound))}")
-    print(f"  Gain (Left): {p_left.deriv(1)(bound):.4f} | Gain (Right): {p_right.deriv(1)(bound):.4f} -> Match: {np.isclose(p_left.deriv(1)(bound), p_right.deriv(1)(bound))}")
+    print(f"  Vp (Left): {p_left(bound):.4f} V  | Vp (Right): {p_right(bound):.4f} V  -> Match: {val_match}")
+    print(f"  Gain (Left): {p_left.deriv(1)(bound):.4f} | Gain (Right): {p_right.deriv(1)(bound):.4f} -> Match: {gain_match}")
 max_error = np.max(np.abs(polys[0](vg_knee_range) - vp_true_knee))
 print(f"\nMaximum error in the knee segment: {max_error:.4f} V (Required: <= {ERROR_TOLERANCE:.1f} V)")
 
