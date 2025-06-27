@@ -1,7 +1,8 @@
 #pragma once
 
 #include <array>
-#include <vector>
+#include <cmath>
+#include <algorithm> // For std::clamp
 
 // Define fixed-size matrix and vector types for our 7-node system.
 // Using std::array provides compile-time bounds checking and avoids dynamic allocation.
@@ -81,10 +82,6 @@ private:
         return x * x;
     }
 };
-
-#include <cmath>
-#include <algorithm> // For std::clamp
-#include <stdexcept> // For std::runtime_error
 
 // A small number to prevent division by zero in conductance calculations
 constexpr double epsilon = 1e-12;

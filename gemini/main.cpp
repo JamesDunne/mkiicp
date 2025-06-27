@@ -5,7 +5,7 @@
 
 #include "sim.hpp"
 #include "tonestack.h"
-#include "waveshaper.h"
+#include "tubemodel.h"
 
 /**
  * @brief Parses a RIFF WAVE file, processes its samples, and writes a new WAVE file.
@@ -371,46 +371,81 @@ int tonestack_main(int argc, char *argv[]) {
     return 0;
 }
 
-int tubestage_main() {
-    TubeAmpModel v1a;
+int tubemodel_main(int argc, char *argv[]) {
+    // Set precision for printing doubles
+    std::cout << std::fixed << std::setprecision(6);
 
-    std::cout << "--- Tube Amp Model Verification ---" << std::endl;
-    std::cout.precision(4);
-    std::cout << std::fixed;
+    std::cout << "--- TubeModel Verification ---" << std::endl;
 
-    // Test key points described in the problem
-    std::vector<double> testGridVoltages = {
-        -24.0, -10.0, -8.0, // Cutoff region
-        -6.0,             // Poly 1
-        -4.38,            // Boundary 1/2
-        -2.0,             // Poly 2
-        -0.73,            // Boundary 2/3
-         0.0,             // Poly 3 (near zero crossing)
-         0.5,             // Poly 3
-         0.96,            // Saturation boundary
-         1.0, 24.0         // Saturation region
-    };
+    // 1. Test clamping regions
+    double vg_below_clamp = -10.0;
+    double vg_above_clamp = 20.0;
+    std::cout << "Vg = " << vg_below_clamp << " -> Vp = " << TubeModel::processSample(vg_below_clamp) << " (Expected High Clamp)" << std::endl;
+    std::cout << "Vg = " << vg_above_clamp << " -> Vp = " << TubeModel::processSample(vg_above_clamp) << " (Expected Low Clamp)" << std::endl;
+    std::cout << std::endl;
 
-    std::cout << "Grid (V)  | Plate (V)" << std::endl;
-    std::cout << "----------|-----------" << std::endl;
+    // 2. Test values within each segment
+    double vg_seg1 = -6.0;
+    double vg_seg2 = -4.0;
+    double vg_seg3 = 0.0;
+    double vg_seg4 = 4.0;
+    double vg_seg5 = 10.0;
+    std::cout << "--- Testing Mid-Segment Values ---" << std::endl;
+    std::cout << "Vg = " << vg_seg1 << " (Seg 1) -> Vp = " << TubeModel::processSample(vg_seg1) << std::endl;
+    std::cout << "Vg = " << vg_seg2 << " (Seg 2) -> Vp = " << TubeModel::processSample(vg_seg2) << std::endl;
+    std::cout << "Vg = " << vg_seg3 << " (Seg 3) -> Vp = " << TubeModel::processSample(vg_seg3) << std::endl;
+    std::cout << "Vg = " << vg_seg4 << " (Seg 4) -> Vp = " << TubeModel::processSample(vg_seg4) << std::endl;
+    std::cout << "Vg = " << vg_seg5 << " (Seg 5) -> Vp = " << TubeModel::processSample(vg_seg5) << std::endl;
+    std::cout << std::endl;
 
-    for (double vg : testGridVoltages) {
-        double vp = v1a.process(vg);
-        std::cout << (vg >= 0 ? " " : "") << vg << "    | " << vp << std::endl;
-    }
+    // 3. Test values at the boundaries to check for continuity
+    // The values should be very close, proving the C0 continuity constraint worked.
+    double b1 = -5.677862;
+    double b2 = -2.481141;
+    double b3 = 1.722849;
+    double b4 = 6.116238;
+    std::cout << "--- Testing Boundary Values ---" << std::endl;
+    std::cout << "Vg approaching " << b1 << " -> Vp = " << TubeModel::processSample(b1 - 1e-9) << std::endl;
+    std::cout << "Vg at " << b1 << "         -> Vp = " << TubeModel::processSample(b1) << std::endl;
+    std::cout << "Vg approaching " << b2 << " -> Vp = " << TubeModel::processSample(b2 - 1e-9) << std::endl;
+    std::cout << "Vg at " << b2 << "         -> Vp = " << TubeModel::processSample(b2) << std::endl;
+    std::cout << "Vg approaching " << b3 << " -> Vp = " << TubeModel::processSample(b3 - 1e-9) << std::endl;
+    std::cout << "Vg at " << b3 << "         -> Vp = " << TubeModel::processSample(b3) << std::endl;
+    std::cout << "Vg approaching " << b4 << " -> Vp = " << TubeModel::processSample(b4 - 1e-9) << std::endl;
+    std::cout << "Vg at " << b4 << "         -> Vp = " << TubeModel::processSample(b4) << std::endl;
 
-    // Verification against known values from simulation
-    std::cout << "\n--- Comparison with SPICE key points ---" << std::endl;
-    std::cout << "Model at Vg=-8.00V: " << v1a.process(-8.0) << " V (SPICE: ~404.9V)" << std::endl;
-    std::cout << "Model at Vg=-4.38V: " << v1a.process(-4.38) << " V (SPICE: ~359.7V)" << std::endl;
-    std::cout << "Model at Vg=-0.73V: " << v1a.process(-0.73) << " V (SPICE: ~119.3V)" << std::endl;
-    std::cout << "Model at Vg=+0.96V: " << v1a.process(0.96) << " V (SPICE: ~16.4V)" << std::endl;
+    return 0;
+}
 
+int stage1_main(int argc, char *argv[]) {
+    ToneStack tone(48000.0);
+    tone.setParams(0.8, 0.1, 0.25, 0.5);
+
+    const std::string input_filename = argv[1];
+    const std::string output_filename = argv[2];
+
+    // process input file and produce output file:
+    double min = 405.0, max = -405.0;
+    processWavFile(
+        input_filename,
+        output_filename,
+        [&](double sample) -> double {
+            double vout = TubeModel::processSample(sample);
+            vout = tone.process(vout);
+            //vout = (TubeModel::processSample(vout) - 2.08157285e+02) / 45.0;
+            double ac_out = vout;
+            if (ac_out > max) { max = ac_out; }
+            if (ac_out < min) { min = ac_out; }
+            return ac_out;
+        }
+    );
+    std::cout << min << " " << max << std::endl;
 
     return 0;
 }
 
 int main(int argc, char *argv[]) {
     // return tonestack_main(argc, argv);
-    return tubestage_main();
+    // return tubemodel_main(argc, argv);
+    return stage1_main(argc, argv);
 }

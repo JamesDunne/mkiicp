@@ -7,5 +7,5 @@ add_executable(mkiicp
 		sim.hpp
         main.cpp
 		wav.cpp
-		waveshaper.h
+        tubemodel.h
 		tonestack.h)
