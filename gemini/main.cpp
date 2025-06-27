@@ -351,7 +351,7 @@ int tonestack_main(int argc, char *argv[]) {
     const std::string output_filename = argv[2];
 
     PassiveToneStack tone;
-    tone.setParameters(48000.0, 0.8, 0.1, 0.25, 0.5);
+    tone.setParameters(48000.0, 0.8, 0.1, 0.25, 0.9);
 
     // process input file and produce output file:
     double min = 1.0, max = -1.0;
@@ -363,7 +363,7 @@ int tonestack_main(int argc, char *argv[]) {
             double ac_out = vout;
             if (ac_out > max) { max = ac_out; }
             if (ac_out < min) { min = ac_out; }
-            return ac_out / 60.0;
+            return ac_out / 1.0;
         }
     );
     std::cout << min << " " << max << std::endl;
@@ -426,7 +426,7 @@ int tonestack_test_main() {
 
     // 2. Set initial parameters (e.g., all knobs at noon)
     std::cout << "Setting parameters: Treble=0.5, Bass=0.5, Mid=0.5, Volume=1.0\n";
-    toneStack.setParameters(sampleRate, 0.5, 0.5, 0.5, 1.0);
+    toneStack.setParameters(sampleRate, 0.5, 0.5, 0.5, 0.9);
 
     // Create a simple impulse signal (1.0 followed by zeros)
     std::vector<float> inputSignal(numSamples, 0.0f);
@@ -442,7 +442,7 @@ int tonestack_test_main() {
 
     // --- Example of changing a parameter ---
     std::cout << "\nScooping the mids: Treble=0.8, Bass=0.8, Mid=0.1\n";
-    toneStack.setParameters(sampleRate, 0.8, 0.8, 0.1, 1.0);
+    toneStack.setParameters(sampleRate, 0.8, 0.8, 0.1, 0.9);
 
     // Resetting the filter state is good practice after a large parameter change
     toneStack.reset();
@@ -459,7 +459,7 @@ int tonestack_test_main() {
 
 int stage1_main(int argc, char *argv[]) {
     PassiveToneStack tone;
-    tone.setParameters(48000.0, 0.8, 0.1, 0.25, 0.5);
+    tone.setParameters(48000.0, 0.67, 0.15, 0.25, 0.86);
 
     const std::string input_filename = argv[1];
     const std::string output_filename = argv[2];
@@ -470,9 +470,12 @@ int stage1_main(int argc, char *argv[]) {
         input_filename,
         output_filename,
         [&](double sample) -> double {
-            double vout = (TubeModel::processSample(sample) - 2.08157285e+02) / 45.0;
-            vout = tone.processSample(vout) / 25.0;
-            //vout = (TubeModel::processSample(vout) - 2.08157285e+02) / 45.0;
+            // double vout = (TubeModel::processSample(sample) - 2.08157285e+02) / 45.0;
+            double vout = TubeModel::processSample(sample);
+            vout -= 2.08157285e+02; // remove DC offset
+            vout = tone.processSample(vout); // apply tone stack
+            vout = TubeModel::processSample(vout);
+            vout = (vout - 2.08157285e+02) / 200.0; // remove DC offset; scale to unity range
             double ac_out = vout;
             if (ac_out > max) { max = ac_out; }
             if (ac_out < min) { min = ac_out; }
@@ -485,8 +488,8 @@ int stage1_main(int argc, char *argv[]) {
 }
 
 int main(int argc, char *argv[]) {
-    return tonestack_main(argc, argv);
     // return tubemodel_main(argc, argv);
-    // return stage1_main(argc, argv);
     // return tonestack_test_main();
+    // return tonestack_main(argc, argv);
+    return stage1_main(argc, argv);
 }
