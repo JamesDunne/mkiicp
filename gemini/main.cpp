@@ -350,8 +350,8 @@ int tonestack_main(int argc, char *argv[]) {
     const std::string input_filename = argv[1];
     const std::string output_filename = argv[2];
 
-    ToneStack sim(48000.0);
-    sim.setParams(0.8, 0.1, 0.25, 0.75);
+    PassiveToneStack tone;
+    tone.setParameters(48000.0, 0.8, 0.1, 0.25, 0.5);
 
     // process input file and produce output file:
     double min = 1.0, max = -1.0;
@@ -359,11 +359,11 @@ int tonestack_main(int argc, char *argv[]) {
         input_filename,
         output_filename,
         [&](double sample) -> double {
-            double vout = sim.process(sample);
+            double vout = tone.processSample(sample);
             double ac_out = vout;
             if (ac_out > max) { max = ac_out; }
             if (ac_out < min) { min = ac_out; }
-            return ac_out / 5.0;
+            return ac_out / 60.0;
         }
     );
     std::cout << min << " " << max << std::endl;
@@ -417,9 +417,49 @@ int tubemodel_main(int argc, char *argv[]) {
     return 0;
 }
 
+int tonestack_test_main() {
+    const double sampleRate = 48000.0;
+    const int numSamples = 10;
+
+    // 1. Create the filter
+    PassiveToneStack toneStack;
+
+    // 2. Set initial parameters (e.g., all knobs at noon)
+    std::cout << "Setting parameters: Treble=0.5, Bass=0.5, Mid=0.5, Volume=1.0\n";
+    toneStack.setParameters(sampleRate, 0.5, 0.5, 0.5, 1.0);
+
+    // Create a simple impulse signal (1.0 followed by zeros)
+    std::vector<float> inputSignal(numSamples, 0.0f);
+    inputSignal[0] = 1.0f;
+
+    // 3. Process the signal
+    std::cout << "Impulse Response:\n";
+    for (int i = 0; i < numSamples; ++i) {
+        float inputSample = inputSignal[i];
+        float outputSample = toneStack.processSample(inputSample);
+        std::cout << "Sample " << i << ": " << outputSample << std::endl;
+    }
+
+    // --- Example of changing a parameter ---
+    std::cout << "\nScooping the mids: Treble=0.8, Bass=0.8, Mid=0.1\n";
+    toneStack.setParameters(sampleRate, 0.8, 0.8, 0.1, 1.0);
+
+    // Resetting the filter state is good practice after a large parameter change
+    toneStack.reset();
+
+    std::cout << "New Impulse Response:\n";
+    for (int i = 0; i < numSamples; ++i) {
+        float inputSample = inputSignal[i];
+        float outputSample = toneStack.processSample(inputSample);
+        std::cout << "Sample " << i << ": " << outputSample << std::endl;
+    }
+
+    return 0;
+}
+
 int stage1_main(int argc, char *argv[]) {
-    ToneStack tone(48000.0);
-    tone.setParams(0.8, 0.1, 0.25, 0.5);
+    PassiveToneStack tone;
+    tone.setParameters(48000.0, 0.8, 0.1, 0.25, 0.5);
 
     const std::string input_filename = argv[1];
     const std::string output_filename = argv[2];
@@ -430,8 +470,8 @@ int stage1_main(int argc, char *argv[]) {
         input_filename,
         output_filename,
         [&](double sample) -> double {
-            double vout = TubeModel::processSample(sample);
-            vout = tone.process(vout);
+            double vout = (TubeModel::processSample(sample) - 2.08157285e+02) / 45.0;
+            vout = tone.processSample(vout) / 25.0;
             //vout = (TubeModel::processSample(vout) - 2.08157285e+02) / 45.0;
             double ac_out = vout;
             if (ac_out > max) { max = ac_out; }
@@ -445,7 +485,8 @@ int stage1_main(int argc, char *argv[]) {
 }
 
 int main(int argc, char *argv[]) {
-    // return tonestack_main(argc, argv);
+    return tonestack_main(argc, argv);
     // return tubemodel_main(argc, argv);
-    return stage1_main(argc, argv);
+    // return stage1_main(argc, argv);
+    // return tonestack_test_main();
 }
