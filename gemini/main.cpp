@@ -7,6 +7,9 @@
 #include "tonestack.h"
 #include "tubemodel.h"
 
+using StageV1A = TubeModel<TubeStageV1A>;
+using StageV1B = TubeModel<TubeStageV1B>;
+
 /**
  * @brief Parses a RIFF WAVE file, processes its samples, and writes a new WAVE file.
  *
@@ -380,8 +383,8 @@ int tubemodel_main(int argc, char *argv[]) {
     // 1. Test clamping regions
     double vg_below_clamp = -10.0;
     double vg_above_clamp = 20.0;
-    std::cout << "Vg = " << vg_below_clamp << " -> Vp = " << TubeModel::processSample(vg_below_clamp) << " (Expected High Clamp)" << std::endl;
-    std::cout << "Vg = " << vg_above_clamp << " -> Vp = " << TubeModel::processSample(vg_above_clamp) << " (Expected Low Clamp)" << std::endl;
+    std::cout << "Vg = " << vg_below_clamp << " -> Vp = " << StageV1A::processSample(vg_below_clamp) << " (Expected High Clamp)" << std::endl;
+    std::cout << "Vg = " << vg_above_clamp << " -> Vp = " << StageV1A::processSample(vg_above_clamp) << " (Expected Low Clamp)" << std::endl;
     std::cout << std::endl;
 
     // 2. Test values within each segment
@@ -391,11 +394,11 @@ int tubemodel_main(int argc, char *argv[]) {
     double vg_seg4 = 4.0;
     double vg_seg5 = 10.0;
     std::cout << "--- Testing Mid-Segment Values ---" << std::endl;
-    std::cout << "Vg = " << vg_seg1 << " (Seg 1) -> Vp = " << TubeModel::processSample(vg_seg1) << std::endl;
-    std::cout << "Vg = " << vg_seg2 << " (Seg 2) -> Vp = " << TubeModel::processSample(vg_seg2) << std::endl;
-    std::cout << "Vg = " << vg_seg3 << " (Seg 3) -> Vp = " << TubeModel::processSample(vg_seg3) << std::endl;
-    std::cout << "Vg = " << vg_seg4 << " (Seg 4) -> Vp = " << TubeModel::processSample(vg_seg4) << std::endl;
-    std::cout << "Vg = " << vg_seg5 << " (Seg 5) -> Vp = " << TubeModel::processSample(vg_seg5) << std::endl;
+    std::cout << "Vg = " << vg_seg1 << " (Seg 1) -> Vp = " << StageV1A::processSample(vg_seg1) << std::endl;
+    std::cout << "Vg = " << vg_seg2 << " (Seg 2) -> Vp = " << StageV1A::processSample(vg_seg2) << std::endl;
+    std::cout << "Vg = " << vg_seg3 << " (Seg 3) -> Vp = " << StageV1A::processSample(vg_seg3) << std::endl;
+    std::cout << "Vg = " << vg_seg4 << " (Seg 4) -> Vp = " << StageV1A::processSample(vg_seg4) << std::endl;
+    std::cout << "Vg = " << vg_seg5 << " (Seg 5) -> Vp = " << StageV1A::processSample(vg_seg5) << std::endl;
     std::cout << std::endl;
 
     // 3. Test values at the boundaries to check for continuity
@@ -405,14 +408,14 @@ int tubemodel_main(int argc, char *argv[]) {
     double b3 = 1.722849;
     double b4 = 6.116238;
     std::cout << "--- Testing Boundary Values ---" << std::endl;
-    std::cout << "Vg approaching " << b1 << " -> Vp = " << TubeModel::processSample(b1 - 1e-9) << std::endl;
-    std::cout << "Vg at " << b1 << "         -> Vp = " << TubeModel::processSample(b1) << std::endl;
-    std::cout << "Vg approaching " << b2 << " -> Vp = " << TubeModel::processSample(b2 - 1e-9) << std::endl;
-    std::cout << "Vg at " << b2 << "         -> Vp = " << TubeModel::processSample(b2) << std::endl;
-    std::cout << "Vg approaching " << b3 << " -> Vp = " << TubeModel::processSample(b3 - 1e-9) << std::endl;
-    std::cout << "Vg at " << b3 << "         -> Vp = " << TubeModel::processSample(b3) << std::endl;
-    std::cout << "Vg approaching " << b4 << " -> Vp = " << TubeModel::processSample(b4 - 1e-9) << std::endl;
-    std::cout << "Vg at " << b4 << "         -> Vp = " << TubeModel::processSample(b4) << std::endl;
+    std::cout << "Vg approaching " << b1 << " -> Vp = " << StageV1A::processSample(b1 - 1e-9) << std::endl;
+    std::cout << "Vg at " << b1 << "         -> Vp = " << StageV1A::processSample(b1) << std::endl;
+    std::cout << "Vg approaching " << b2 << " -> Vp = " << StageV1A::processSample(b2 - 1e-9) << std::endl;
+    std::cout << "Vg at " << b2 << "         -> Vp = " << StageV1A::processSample(b2) << std::endl;
+    std::cout << "Vg approaching " << b3 << " -> Vp = " << StageV1A::processSample(b3 - 1e-9) << std::endl;
+    std::cout << "Vg at " << b3 << "         -> Vp = " << StageV1A::processSample(b3) << std::endl;
+    std::cout << "Vg approaching " << b4 << " -> Vp = " << StageV1A::processSample(b4 - 1e-9) << std::endl;
+    std::cout << "Vg at " << b4 << "         -> Vp = " << StageV1A::processSample(b4) << std::endl;
 
     return 0;
 }
@@ -470,12 +473,12 @@ int stage1_main(int argc, char *argv[]) {
         input_filename,
         output_filename,
         [&](double sample) -> double {
-            // double vout = (TubeModel::processSample(sample) - 2.08157285e+02) / 45.0;
-            double vout = TubeModel::processSample(sample);
-            vout -= 2.08157285e+02; // remove DC offset
+            // double vout = (StageV1A::processSample(sample) - 2.08157285e+02) / 45.0;
+            double vout = StageV1A::processSample(sample);
+            vout -= StageV1A::Params::SEG3_COEFFS[2]; // remove DC offset
             vout = tone.processSample(vout); // apply tone stack
-            vout = TubeModel::processSample(vout);
-            vout = (vout - 2.08157285e+02) / 200.0; // remove DC offset; scale to unity range
+            vout = StageV1B::processSample(vout);
+            vout = (vout - StageV1B::Params::SEG3_COEFFS[2]) / 200.0; // remove DC offset; scale to unity range
             double ac_out = vout;
             if (ac_out > max) { max = ac_out; }
             if (ac_out < min) { min = ac_out; }
