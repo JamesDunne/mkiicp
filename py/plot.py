@@ -23,11 +23,11 @@ get_original_vp = interp1d(vg_data, vp_data, bounds_error=False, fill_value="ext
 
 # --- 2. Define Constants and Segments ---
 
+# *** FINAL MODEL: 5-SEGMENTS WITH OPTIMIZED DEGREES ***
+# Updated last segment to quadratic as requested.
 DEGREES = [2, 3, 2, 2, 2] 
 COEFF_COUNTS = [d + 1 for d in DEGREES]
 TOTAL_COEFFS = sum(COEFF_COUNTS)
-
-# *** FIX: Corrected the number of internal boundaries for the 5-segment model ***
 NUM_INTERNAL_BOUNDARIES = 4
 
 # Define FIXED outer boundaries
@@ -63,11 +63,11 @@ constraints = []
 p_indices = np.cumsum([0] + COEFF_COUNTS)
 
 # Constraint 1: Boundary ordering (with a small margin to prevent collapse)
-constraints.append({'type': 'ineq', 'fun': lambda x: x[0] - VG_START - 0.2}) # b1 > start
-constraints.append({'type': 'ineq', 'fun': lambda x: x[1] - x[0] - 0.2})     # b2 > b1
-constraints.append({'type': 'ineq', 'fun': lambda x: x[2] - x[1] - 0.2})     # b3 > b2
-constraints.append({'type': 'ineq', 'fun': lambda x: x[3] - x[2] - 0.2})     # b4 > b3
-constraints.append({'type': 'ineq', 'fun': lambda x: VG_END - x[3] - 0.2})   # end > b4
+constraints.append({'type': 'ineq', 'fun': lambda x: x[0] - VG_START - 0.2})
+constraints.append({'type': 'ineq', 'fun': lambda x: x[1] - x[0] - 0.2})
+constraints.append({'type': 'ineq', 'fun': lambda x: x[2] - x[1] - 0.2})
+constraints.append({'type': 'ineq', 'fun': lambda x: x[3] - x[2] - 0.2})
+constraints.append({'type': 'ineq', 'fun': lambda x: VG_END - x[3] - 0.2})
 
 # Constraint 2: C0 and C1 Continuity
 for i in range(NUM_INTERNAL_BOUNDARIES):
@@ -126,10 +126,36 @@ optimized_boundaries = x_opt[:NUM_INTERNAL_BOUNDARIES]
 optimized_coeffs = x_opt[NUM_INTERNAL_BOUNDARIES:]
 final_all_boundaries = [VG_START] + list(optimized_boundaries) + [VG_END]
 
-print("\n--- Final Optimized Model ---")
-print(f"Initial Boundaries: {initial_boundaries}")
-print(f"Optimized Boundaries: {[round(b, 4) for b in optimized_boundaries]}")
+print("\n\n" + "="*80)
+print("--- Final Optimized Model Parameters for C++ Implementation ---")
+print("="*80)
+print(f"\nUpper Clamp (for Vg < {final_all_boundaries[0]:.6f}): {CLAMP_HIGH_V:.6f}")
+print(f"Lower Clamp (for Vg >= {final_all_boundaries[-1]:.6f}): {CLAMP_LOW_V:.6f}\n")
 
+degree_names = {1: "Linear (ax + b)", 2: "Quadratic (ax^2 + bx + c)", 3: "Cubic (ax^3 + bx^2 + cx + d)"}
+
+for i in range(len(DEGREES)):
+    p_segment = optimized_coeffs[p_indices[i]:p_indices[i+1]]
+    vg_start, vg_end = final_all_boundaries[i], final_all_boundaries[i+1]
+    
+    # Determine segment range string
+    if i < len(DEGREES) - 1:
+        range_str = f"Vg in [{vg_start:.6f}, {vg_end:.6f})"
+    else: # Last segment is inclusive of the end boundary
+        range_str = f"Vg in [{vg_start:.6f}, {vg_end:.6f}]"
+
+    print(f"--- Segment {i+1}: {range_str} ---")
+    print(f"  Type: {degree_names[DEGREES[i]]}")
+    # Note on coefficient order
+    print("  Coefficients (in descending power order, e.g., a, b, c, ...):")
+    # Format each coefficient in scientific notation for precision
+    formatted_coeffs = [f"{c:.8e}" for c in p_segment]
+    print(f"  {formatted_coeffs}\n")
+
+print("="*80)
+
+
+# --- 7. Visualization ---
 def get_model_vp(vg):
     vg = np.asarray(vg)
     vp_out = np.zeros_like(vg, dtype=float)
@@ -144,8 +170,7 @@ def get_model_vp(vg):
         
     return vp_out
 
-# --- 7. Visualization ---
-print("Generating plot...")
+print("\nGenerating final verification plot...")
 vg_plot = np.linspace(-24, 24, 2000)
 vp_model_plot = get_model_vp(vg_plot)
 
