@@ -1,4 +1,4 @@
-* 12AX7 Gain Stage V1A Simulation
+* 12AX7 Gain Stage V3B Simulation
 
 * Include the 12AX7 Subcircuit Models
 .SUBCKT 12AX7 1 2 3; A G C;
@@ -19,42 +19,20 @@ R1 2 5 {RGI}
 .ENDS TriodeK
 
 * Main Circuit Components for V3B
-Vb+ N010 0 410V                 ; B+ Voltage Source
-Ra  N010 plate 82k              ; Plate Load Resistor
+Vb+ b+ 0 410V                 ; B+ Voltage Source
+Ra  b+ plate 82k              ; Plate Load Resistor
 Rk  cath 0 1.5k               ; Cathode Resistor
-Ck  cath 0 2.2uF              ; Cathode Bypass Capacitor
-C22 cath grid 120p
-R22 grid   0  475k
-.param gain 0.15
-RC_drive grid 0 {1Meg*(gain)}
-RA_drive N024 grid {1Meg*(1-gain)}
-R21 N011 N024 680k
-C21 N001 N011 0.02uF
-R9 N001 0 100k
-
-C10 N001 N002 20pF
-R10 N001 N002 3.3Meg
-
-R11 N002 0 680k
-C11 N001 0 47pF
-
-Vin N009 0 PWL(0 20.0V 1s 300.0V)
-C7 N009 N001 0.1uF
-
-R31 N002 N026 220k
-C31 N002 N026 220k
-C32 N002 0 500p
-R32 N002 0 100k
-C30 N026 N025 0.047uF
-R27 N025 N010 274k
-
+Ck  cath 0 2.2uF               ; Cathode Bypass Capacitor
+C22 grid cath 120pF ; fizz cap
+R22 grid 0 475k
+Vin grid 0 PWL(0 -12.0V 1s 32.0V)
 
 * Instantiate the 12AX7 Triode
 *       Plate Grid Cathode
-X_U1A   plate grid cath 12AX7
+XV3B    plate grid cath 12AX7
 
 * Analysis Command
 .TRAN 1ms 1s                  ; Transient analysis over 1 second
-.PROBE V(plate) V(grid)       ; Save plate and grid voltages for analysis
+.PROBE V(grid) V(plate)       ; Save plate and grid voltages for analysis
 
 .END
