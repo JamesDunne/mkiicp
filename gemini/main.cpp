@@ -9,6 +9,7 @@
 
 using StageV1A = TubeModel<TubeStageV1A>;
 using StageV1B = TubeModel<TubeStageV1B>;
+using StageV3B = TubeModel<TubeStageV3B>;
 
 /**
  * @brief Parses a RIFF WAVE file, processes its samples, and writes a new WAVE file.
@@ -478,7 +479,10 @@ int stage1_main(int argc, char *argv[]) {
             vout -= StageV1A::Params::SEG3_COEFFS[2]; // remove DC offset
             vout = tone.processSample(vout); // apply tone stack
             vout = StageV1B::processSample(vout);
-            vout = (vout - StageV1B::Params::SEG3_COEFFS[2]) / 200.0; // remove DC offset; scale to unity range
+            vout -= StageV1B::Params::SEG3_COEFFS[2]; // remove DC offset
+            vout /= 47.0;
+            vout = StageV3B::processSample(vout);
+            vout = (vout - StageV3B::Params::SEG3_COEFFS[2]) / 200.0; // remove DC offset; scale to unity range
             double ac_out = vout;
             if (ac_out > max) { max = ac_out; }
             if (ac_out < min) { min = ac_out; }

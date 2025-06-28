@@ -82,6 +82,45 @@ struct TubeStageV1B
 };
 
 /**
+ * @struct TubeStageV3B
+ * @brief A data-only struct for a third tube model (V3B).
+ *
+ * This struct contains a different set of parameters but is fully compatible
+ * with the generic TubeModel<T> processor class.
+ */
+struct TubeStageV3B
+{
+    // --- Clamping Voltages ---
+    static constexpr double CLAMP_HIGH_V = 410.0;
+    static constexpr double CLAMP_LOW_V  = 22.570510;
+
+    // --- Optimized Segment Boundaries ---
+    static constexpr double BOUNDARY_0 = -9.887168;
+    static constexpr double BOUNDARY_1 = -5.939045;
+    static constexpr double BOUNDARY_2 = -1.566184;
+    static constexpr double BOUNDARY_3 = 3.612823;
+    static constexpr double BOUNDARY_4 = 12.800175;
+    static constexpr double BOUNDARY_5 = 25.222780;
+
+    // --- Polynomial Coefficients ---
+
+    // Segment 1: Vg in [-9.887168, -5.939045) -> Quadratic
+    static constexpr std::array<double, 3> SEG1_COEFFS = { -5.31602679e-02, -9.66479730e-01, 4.05607294e+02 };
+
+    // Segment 2: Vg in [-5.939045, -1.566184) -> Cubic
+    static constexpr std::array<double, 4> SEG2_COEFFS = { 4.11523852e-01, 1.57922933e+00, -2.51229307e+01, 2.90770443e+02 };
+
+    // Segment 3: Vg in [-1.566184, 3.612823) -> Quadratic
+    static constexpr std::array<double, 3> SEG3_COEFFS = { -3.54365215e-01, -2.81513399e+01, 2.89189405e+02 };
+
+    // Segment 4: Vg in [3.612823, 12.800175) -> Quadratic
+    static constexpr std::array<double, 3> SEG4_COEFFS = { 1.56190133e+00, -4.19976045e+01, 3.14201458e+02 };
+
+    // Segment 5: Vg in [12.800175, 25.222780] -> Quadratic
+    static constexpr std::array<double, 3> SEG5_COEFFS = { 9.74324848e-02, -4.50669058e+00, 7.42563358e+01 };
+};
+
+/**
  * @class TubeModel
  * @brief A generic, templated processor for a piecewise polynomial tube model.
  *
