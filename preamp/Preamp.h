@@ -40,6 +40,13 @@ public:
 
     TubeStage v1a, v1b, v3b, v4a, v2a, v2b;
     ToneStack toneStack;
+
+    IIRBiquad v3b_to_v4a_hpf;
+    IIRBiquad v3b_to_v4a_lpf; // The "Fizz Filter"
+
+    IIRBiquad v4a_output_hpf;
+    IIRBiquad final_mixer_lpf; // The main post-distortion LPF
+
 public:
     MinMax mm_v1a, mm_toneStack, mm_v1b, mm_v3b, mm_v4a, mm_v2a, mm_output;
 };

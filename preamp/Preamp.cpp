@@ -79,6 +79,14 @@ void Preamp::prepare(double sampleRate) {
 
     // --- 3. Prepare Passive Tone Stack ---
     toneStack.prepare(sampleRate);
+
+    // Between V3B and V4A
+    make_hpf(v3b_to_v4a_hpf, sampleRate, 133.0);
+    make_lpf(v3b_to_v4a_lpf, sampleRate, 2270.0);
+
+    // After V4A and at the main mixer bus
+    make_hpf(v4a_output_hpf, sampleRate, 22.0);
+    make_lpf(final_mixer_lpf, sampleRate, 3400.0);
 }
 
 void Preamp::setParameters(double treble, double mid, double bass, double vol1, double gain, double master) {
@@ -138,19 +146,18 @@ double Preamp::processSample(double in) {
     lead_path = v3b.process(lead_path, V4A_R_IN);
     mm_v3b.measureMinMax(lead_path);
 
-    // --- V3B Output to V4A Input Network ---
-    // This is a CRITICAL voltage divider formed by R25 and R24.
-    // V(N030) = V(N018) * R24 / (R25 + R24)
-    const double R24 = 68e3;
-    const double R25 = 270e3;
-    const double V4A_DIVIDER_ATTENUATION = R24 / (R25 + R24); // Approx 0.2
+    // --- Filtering between V3B and V4A ---
+    lead_path = v3b_to_v4a_hpf.process(lead_path); // HPF from C25
 
-    lead_path *= V4A_DIVIDER_ATTENUATION;
+    // Post-V3B Attenuation (V4A input divider)
+    const double R24 = 68e3, R25 = 270e3;
+    lead_path *= R24 / (R25 + R24);
+
+    lead_path = v3b_to_v4a_lpf.process(lead_path); // LPF from C24/R24
 
     // Process through V4A
-    lead_path = v4a.inputFilter.process(lead_path);
     lead_path = v4a.process(lead_path, V2A_R_IN);
-    lead_path = v4a.interStageLPF.process(lead_path); // "Fizz" filter
+    lead_path = v4a_output_hpf.process(lead_path); // "Fizz" filter
     mm_v4a.measureMinMax(lead_path);
 
     double lead_path_out = lead_path;
@@ -164,6 +171,8 @@ double Preamp::processSample(double in) {
 
     // Blend the attenuated signals
     sample = (rhythm_path_out * (1.0 - 0.8) + lead_path_out * 0.8) * MIXER_ATTENUATION;
+
+    sample = final_mixer_lpf.process(sample); // Critical LPF at node N002
 
     // Process through V2A
     sample = v2a.inputFilter.process(sample);
