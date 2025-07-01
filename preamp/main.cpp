@@ -23,10 +23,10 @@ int main(int argc, char* argv[]) {
 
     // 2. Set the control parameters (values from 0.0 to 1.0)
     // These correspond to the .param values in the SPICE file
-    double treble = 0.67;
-    double mid = 0.4;
-    double bass = 0.15;
-    double vol1 = 0.85;
+    double treble = 0.8;
+    double mid = 0.5;
+    double bass = 0.25;
+    double vol1 = 0.75;
     double gain = 0.75; // Lead Drive
     double master = 0.5;
 
