@@ -40,5 +40,7 @@ int main(int argc, char* argv[]) {
         }
     );
 
+    myPreamp.printMinMax();
+
     return 0;
 }

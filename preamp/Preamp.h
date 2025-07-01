@@ -2,16 +2,9 @@
 #include "IIRBiquad.h"
 #include <vector>
 #include <cmath>
+#include <iostream>
+#include <ostream>
 
-// A simple waveshaper to emulate tube saturation.
-// Asymmetrical to better mimic a triode.
-inline double tubeSaturate(double x, double drive) {
-    x *= drive;
-    if (x > 0) {
-        return 1.0 - exp(-x);
-    }
-    return -1.0 + exp(x * 0.9); // Slightly different curve for negative half
-}
 
 // --- Individual Stage Classes ---
 
@@ -119,6 +112,8 @@ public:
     }
 
     void reset() {
+        m_min = 1.0; m_max = -1.0;
+
         v1a.reset();
         toneStack.reset();
         v1b.reset();
@@ -133,19 +128,15 @@ public:
         v2a.setMaster(master);
     }
 
-    double processSample(double in) {
-        double sample = v1a.process(in);
-        sample = toneStack.process(sample);
+    double processSample(double in);
 
-        double lead_path = v3b_v4a.process(sample);
-        double rhythm_path = v1b.process(sample);
+    void measureMinMax(double sample) {
+        if (sample < m_min) m_min = sample;
+        if (sample > m_max) m_max = sample;
+    }
 
-        sample = lead_path * 0.8 + rhythm_path * 0.2;
-
-        sample = v2a.process(sample);
-        sample = v2b.process(sample);
-
-        return sample * (1.0 / 1400.0) * 20.0;
+    void printMinMax() {
+        std::cout << m_min << " " << m_max << std::endl;
     }
 
 private:
@@ -155,4 +146,6 @@ private:
     V3BV4AStage v3b_v4a;
     V2AStage v2a;
     V2BStage v2b;
+
+    double m_min,m_max;
 };
