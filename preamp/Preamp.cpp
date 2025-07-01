@@ -52,46 +52,46 @@ void Preamp::prepare(double sampleRate) {
 }
 
 double Preamp::processSample(double in) {
-    const double TONE_STACK_R_IN = 1e6;
-    const double V1B_LOAD_R_IN = 800e3;
-    const double V3B_R_IN = 1.5e6;
-    const double V4A_R_IN = 54.3e3;
-    const double V2A_R_IN = 47e3;
-    const double V2B_R_IN = 1e6;
-    const double FINAL_R_OUT = 47e3;
+    double sample = in;
 
-    double sample = in * 0.2;
-    
     // V1A -> Tone Stack
-    sample = v1a.process(sample, TONE_STACK_R_IN);
+    sample = v1a.process(sample);
+    mm_v1a.measureMinMax(sample);
+#if 1
+    return sample;
+#else
     sample = v1a_output_lpf.process(sample);
+
     sample = toneStack.process(sample);
-    double ts_out = sample;
+    mm_toneStack.measureMinMax(sample);
+    sample = v1b.process(sample);
+    mm_v1b.measureMinMax(sample);
 
     // Rhythm Path
-    double rhythm_path = v1b.process(ts_out, V1B_LOAD_R_IN);
-    rhythm_path = v1b_to_rhythm_lpf.process(rhythm_path);
-    
+    double rhythm_path = v1b_to_rhythm_lpf.process(sample);
+
     // Lead Path
     const double ATTENUATION_PRE_V3B = 0.2;
-    double lead_path = ts_out * ATTENUATION_PRE_V3B;
+    double lead_path = sample * ATTENUATION_PRE_V3B;
     lead_path = ts_to_v3b_hpf.process(lead_path);
     lead_path *= lead_drive;
-    lead_path = v3b.process(lead_path, V4A_R_IN);
+    lead_path = v3b.process(lead_path);
     lead_path = v3b_to_v4a_hpf.process(lead_path);
     lead_path *= 68e3 / (270e3 + 68e3);
     lead_path = v3b_to_v4a_lpf.process(lead_path);
-    lead_path = v4a.process(lead_path, V2A_R_IN);
+    lead_path = v4a.process(lead_path);
     lead_path = v4a_to_mixer_hpf.process(lead_path);
     
     // Mixdown & Final Stages
     const double MIXER_ATTENUATION = 0.5;
     sample = (rhythm_path * 0.2 + lead_path * 0.8) * MIXER_ATTENUATION;
     sample = mixer_output_lpf.process(sample);
-    sample = v2a.process(sample, V2B_R_IN);
+    sample = v2a.process(sample);
     sample *= master_vol;
-    sample = v2b.process(sample, FINAL_R_OUT);
+    sample = v2b.process(sample);
     sample = v2b_output_hpf.process(sample);
+    mm_output.measureMinMax(sample);
     
-    return sample * 0.05;
+    return sample / 400.0;
+#endif
 }

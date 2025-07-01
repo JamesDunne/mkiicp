@@ -1,8 +1,12 @@
 #pragma once
 
-// A standard Direct Form 1 IIR Biquad filter.
 class IIRBiquad {
 public:
+    // A simple struct to hold the filter's state
+    struct State {
+        double x1, x2, y1, y2;
+    };
+
     IIRBiquad() {
         reset();
     }
@@ -33,6 +37,17 @@ public:
         y1 = y2 = value * dc_gain;
     }
 
+    State getState() const {
+        return {x1, x2, y1, y2};
+    }
+
+    void setState(const State& state) {
+        x1 = state.x1;
+        x2 = state.x2;
+        y1 = state.y1;
+        y2 = state.y2;
+    }
+
     // Process a single sample
     inline double process(double in) {
         double out = b0 * in + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
@@ -45,5 +60,5 @@ public:
 
 private:
     double a1, a2, b0, b1, b2;
-    double x1, x2, y1, y2; // state
+    double x1, x2, y1, y2;
 };

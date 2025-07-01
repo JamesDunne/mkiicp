@@ -32,10 +32,10 @@ int main(int argc, char* argv[]) {
 
     myPreamp.setParameters(treble, mid, bass, vol1, gain, master);
 
-#if 0
+#if 1
     for (int i = 0; i < 1024; i++) {
         double x = (i - 512) / 512.0;
-        double y = myPreamp.v1a.process(x, 1e6);
+        double y = myPreamp.processSample(x);
         std::cout << x << "\t" << y << std::endl;
     }
 #else
