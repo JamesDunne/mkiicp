@@ -5,6 +5,7 @@
 #include <iostream>
 #include <ostream>
 
+double tubeSaturate12AX7(double x, double drive, double bias, double Vp);
 
 // --- Individual Stage Classes ---
 

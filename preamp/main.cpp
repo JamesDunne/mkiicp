@@ -17,6 +17,14 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+#if 0
+    for (int i = 0; i < 1024; i++) {
+        double x = (i - 512) / 512.0;
+        double y = tubeSaturate12AX7(x, 1.0, 1.5, 210.0);
+        std::cout << x << "\t" << y << std::endl;
+    }
+#endif
+
     // 1. Create and prepare the preamp instance
     Preamp myPreamp;
     myPreamp.prepare(SAMPLE_RATE);

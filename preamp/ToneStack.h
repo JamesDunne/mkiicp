@@ -4,11 +4,13 @@
 
 #pragma once
 
-#include "IIRFilter.h" // Use the new filter header
+#include "IIRBiquad.h" // We'll go back to the trusty biquad
+
+// ... other class definitions ...
 
 class ToneStack {
 public:
-    ToneStack() = default;
+    ToneStack();
     void prepare(double sampleRate);
     void reset();
     void setParams(double treble, double mid, double bass, double volume);
@@ -17,10 +19,10 @@ public:
 private:
     void calculateCoefficients();
 
-    double sampleRate = 44100.0;
-    // Store pot positions (0-1) directly
-    double p_treble = 0.8, p_mid = 0.5, p_bass = 0.25, p_vol = 0.75;
+    double sampleRate;
+    double p_treble, p_mid, p_bass, p_vol;
 
-    DirectFormIIR<3> filter;
-    double volumeGain = 1.0;
+    IIRBiquad bassMidFilter;   // Models the main body of the tone
+    IIRBiquad trebleFilter;    // Models the bright cap and treble control
+    double volumeGain;
 };
