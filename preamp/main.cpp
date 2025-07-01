@@ -32,10 +32,10 @@ int main(int argc, char* argv[]) {
 
     myPreamp.setParameters(treble, mid, bass, vol1, gain, master);
 
-#if 1
+#if 0
     for (int i = 0; i < 1024; i++) {
         double x = (i - 512) / 512.0;
-        double y = myPreamp.v1a.process(x);
+        double y = myPreamp.v1a.process(x, 1e6);
         std::cout << x << "\t" << y << std::endl;
     }
 #else
@@ -44,17 +44,17 @@ int main(int argc, char* argv[]) {
         argv[1],
         argv[2],
         [&](double sample) -> double {
-            //return myPreamp.v1a.process(sample);
             return myPreamp.processSample(sample);
         }
     );
 
-    std::cout << "v1a: ";
-    myPreamp.mm_v1a.printMinMax();
-    std::cout << "tone: ";
-    myPreamp.mm_toneStack.printMinMax();
-    std::cout << "out: ";
-    myPreamp.mm_output.printMinMax();
+    myPreamp.mm_v1a.printMinMax(" v1a");
+    myPreamp.mm_toneStack.printMinMax("tone");
+    myPreamp.mm_v1b.printMinMax(" v1b");
+    myPreamp.mm_v3b.printMinMax(" v3b");
+    myPreamp.mm_v4a.printMinMax(" v4a");
+    myPreamp.mm_v2a.printMinMax(" v2a");
+    myPreamp.mm_output.printMinMax(" out");
 #endif
 
     return 0;

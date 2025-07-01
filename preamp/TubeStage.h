@@ -4,29 +4,33 @@
 class TubeStage {
 public:
     TubeStage();
-    // New signature: Now takes bypass capacitance C_k. 0.0 means unbypassed.
     void prepare(double sampleRate, double R_k, double R_L, double V_supply, double C_k);
     void reset();
-    double process(double in);
+    double process(double in, double R_load);
+
+    // Accessor to get the calculated DC plate voltage
+    double getVpDC() const { return Vp_dc; }
 
 private:
-    void solveDC();
+    void calculateOperatingPoint();
 
     // Physical Parameters
-    double R_k, R_L, V_supply, C_k;
+    double R_k, R_L, V_supply;
     bool isBypassed;
 
     // SPICE Model Constants
-    const double Mu = 96.20, Ex = 1.437, KG1 = 613.4, KP = 740.3, KVB = 1672.0;
+    const double Mu = 96.20, Ex = 1.437, KG1 = 613.4;
 
-    // Solved DC Operating Point
+    // Calculated Operating Point & Thevenin Parameters
     double Vp_dc;
-    double Ip_q;
+    double r_p;
+    double R_out;
+    double gain;
 
-    // Filters managed by the stage itself
+    // Filters
     IIRBiquad cathodeBypassFilter;
 
 public:
-    // Public filters for inter-stage coupling, configured externally
+    // Public filters for external coupling networks
     IIRBiquad inputFilter, outputFilter, interStageLPF;
 };

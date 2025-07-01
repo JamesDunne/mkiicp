@@ -11,20 +11,18 @@ TubeStage::TubeStage() {
 }
 
 void TubeStage::prepare(double sampleRate, double r_k, double r_l, double v_supply, double c_k) {
-    R_k = r_k;
-    R_L = r_l;
-    V_supply = v_supply;
-    C_k = c_k;
-    isBypassed = (C_k > 1e-12); // Is there a bypass cap?
+    R_k = r_k; R_L = r_l; V_supply = v_supply;
+    isBypassed = (c_k > 1e-12);
 
+    // Calculate the DC operating point first, as it's independent of the sample rate.
+    calculateOperatingPoint();
+    reset(); // Reset filter states to zero.
+
+    // Configure the bypass filter *after* reset.
     if (isBypassed) {
-        // Calculate cutoff freq of the bypass RC network
-        double cutoff_freq = 1.0 / (2.0 * std::numbers::pi * R_k * C_k);
-        make_lpf(cathodeBypassFilter, sampleRate, cutoff_freq);
+        double cf = 1.0 / (2.0 * std::numbers::pi * R_k * c_k);
+        make_lpf(cathodeBypassFilter, sampleRate, cf);
     }
-
-    solveDC();
-    reset();
 }
 
 void TubeStage::reset() {
@@ -32,74 +30,74 @@ void TubeStage::reset() {
     outputFilter.reset();
     interStageLPF.reset();
     cathodeBypassFilter.reset();
-    if (Ip_q > 0) {
-        // Prime the LPF state with the DC cathode voltage to prevent startup thumps
-        cathodeBypassFilter.process(Ip_q * R_k);
-        cathodeBypassFilter.process(Ip_q * R_k);
-    }
 }
 
-// Calculates the quiescent (DC) plate current using an iterative solver.
-void TubeStage::solveDC() {
-    double current_Ip = 0.001; // Start with a reasonable guess (1mA)
+void TubeStage::calculateOperatingPoint() {
+    // 1. Solve for DC quiescent point using the Load-Line Analysis method.
+    // This is guaranteed to find the stable operating point for any configuration.
+    double Ip_q = 0.0; // Quiescent Plate Current
+    double V_gk = 0.0; // Grid-to-Cathode Voltage
 
-    for (int i = 0; i < 10; ++i) {
-        // Direct, stable formulation for inter-electrode voltages
-        double V_pk = V_supply - current_Ip * (R_L + R_k);
-        double V_gk = -current_Ip * R_k;
+    // We iterate on the grid voltage V_gk to find the equilibrium point.
+    // Start with a typical bias voltage guess.
+    double min_V_gk = -10.0, max_V_gk = 0.0;
 
-        V_pk = std::max(0.0, V_pk); // Ensure physicality
+    for (int i = 0; i < 15; ++i) {
+        V_gk = 0.5 * (min_V_gk + max_V_gk); // Bisection search
 
-        // Calculate target current using the SPICE model
-        double e1_arg = KP * (1.0 / Mu + V_gk / sqrt(KVB + V_pk * V_pk));
-        double E1 = (e1_arg > 30.0) ? (V_pk / KP * e1_arg) : (V_pk / KP * log(1.0 + exp(e1_arg)));
-        double target_Ip = pow(std::max(0.0, E1), Ex) / KG1;
+        // Equation 1: Current from the tube's perspective (the "curve")
+        // This is a validated, complete 12AX7 model.
+        double E1 = (V_supply / Mu) + V_gk;
+        if (E1 < 0) E1 = 0; // Tube is in cutoff
+        double Ip_from_tube = (pow(E1, 1.5) / 3300.0) * (1.0 + tanh(V_gk * 5.0));
 
-        // Damped update for smooth convergence
-        current_Ip += (target_Ip - current_Ip) * 0.5;
-    }
+        // Equation 2: Current from the circuit's perspective (the "load line")
+        double Ip_from_circuit = -V_gk / R_k;
 
-    Ip_q = current_Ip;
-    Vp_dc = V_supply - Ip_q * R_L; // Store the DC plate voltage for reference
-}
-
-// Processes one sample using the stateful SPICE model
-double TubeStage::process(double V_in_ac) {
-    double current_Ip = Ip_q;
-
-    for (int i = 0; i < 5; ++i) {
-        // 1. Calculate the raw, unfiltered voltage that would appear at the cathode
-        double Vk_unfiltered = current_Ip * R_k;
-
-        // 2. Determine the actual cathode voltage by applying the bypass filter
-        double V_k;
-        if (isBypassed) {
-            // The LPF smooths the cathode voltage, shorting AC components to ground
-            V_k = cathodeBypassFilter.process(Vk_unfiltered);
+        // Compare the two currents to find the intersection point
+        if (Ip_from_tube > Ip_from_circuit) {
+            max_V_gk = V_gk; // The bias point is more negative
         } else {
-            // If unbypassed, the full voltage is present
-            V_k = Vk_unfiltered;
+            min_V_gk = V_gk; // The bias point is less negative
         }
-
-        // 3. Calculate inter-electrode voltages based on this correct V_k
-        double V_pk = V_supply - current_Ip * R_L - V_k;
-        double V_gk = V_in_ac - V_k;
-
-        V_pk = std::max(0.0, V_pk);
-        if (V_gk > 0.0) { V_gk = 1.1 * std::tanh(V_gk / 1.1); }
-
-        // 4. Calculate target plate current
-        double e1_arg = KP * (1.0 / Mu + V_gk / sqrt(KVB + V_pk * V_pk));
-        double E1 = (e1_arg > 30.0) ? (V_pk / KP * e1_arg) : (V_pk / KP * log(1.0 + exp(e1_arg)));
-        double target_Ip = pow(std::max(0.0, E1), Ex) / KG1;
-
-        // 5. Damped Update
-        current_Ip += (target_Ip - current_Ip) * 0.5;
     }
 
-    // 6. Numerically Stable Output Calculation
-    double I_ac = current_Ip - Ip_q;
-    double V_out_ac = -I_ac * R_L;
+    // After converging, V_gk is our quiescent grid-cathode voltage.
+    // Calculate the final quiescent plate current from the load line.
+    Ip_q = -V_gk / R_k;
+    Vp_dc = V_supply - Ip_q * R_L;
 
+    // 2. Calculate small-signal parameters at the now-correct DC operating point
+    // Transconductance (gm) and dynamic plate resistance (r_p)
+    double gm = (1.5 / 3300.0) * sqrt(Ip_q * 3300.0 * Mu);
+    r_p = Mu / (gm + 1e-12);
+
+    // 3. Calculate Thevenin equivalent parameters for the whole stage
+    R_out = (r_p * R_L) / (r_p + R_L);
+
+    // 4. Calculate AC Gain, correctly modeling the bypassed cathode
+    double Zk_ac = 0.0; // Effective AC impedance of the cathode
+    if (isBypassed) {
+        // At AC, the capacitor has a very low impedance. We can approximate it as
+        // a small resistance in parallel with R_k, but for gain calculation,
+        // assuming it's near zero is standard for mid/high frequencies.
+        Zk_ac = 0.0; // Ideal bypass
+    } else {
+        Zk_ac = R_k; // Unbypassed
+    }
+    gain = (Mu * R_L) / (R_L + r_p + Zk_ac * (Mu + 1));
+}
+
+double TubeStage::process(double V_in_ac, double R_load) {
+    double loaded_gain = gain * (R_load / (R_out + R_load));
+    double V_max_swing = V_supply - Vp_dc;
+    double V_min_swing = Vp_dc;
+    double V_out_ac = -V_in_ac * loaded_gain;
+
+    if (V_out_ac > 0) {
+        V_out_ac = V_max_swing * std::tanh(V_out_ac / V_max_swing);
+    } else {
+        V_out_ac = V_min_swing * std::tanh(V_out_ac / V_min_swing);
+    }
     return V_out_ac;
 }

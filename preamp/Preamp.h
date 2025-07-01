@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iomanip>
 #include <iostream>
 #include <ostream>
 
@@ -15,8 +16,10 @@ public:
         if (sample > m_max) m_max = sample;
     }
 
-    void printMinMax() {
-        std::cout << m_min << " " << m_max << std::endl;
+    void printMinMax(const std::string& name) {
+        std::cout << name << ": "
+            << std::setprecision(6) << m_min << " "
+            << std::setprecision(6) << m_max << std::endl;
     }
 
 private:
@@ -38,5 +41,5 @@ public:
     TubeStage v1a, v1b, v3b, v4a, v2a, v2b;
     ToneStack toneStack;
 public:
-    MinMax mm_v1a, mm_toneStack, mm_v1b, mm_output;
+    MinMax mm_v1a, mm_toneStack, mm_v1b, mm_v3b, mm_v4a, mm_v2a, mm_output;
 };
