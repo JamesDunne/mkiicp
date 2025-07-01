@@ -4,10 +4,19 @@
 
 // Dummy audio data for demonstration
 const int SAMPLE_RATE = 48000;
-const int DURATION_SECONDS = 5;
-const int NUM_SAMPLES = SAMPLE_RATE * DURATION_SECONDS;
 
-int main() {
+void processWavFile(
+    const std::string& inputFilename,
+    const std::string& outputFilename,
+    const std::function<double(double)>& processor
+);
+
+int main(int argc, char* argv[]) {
+    if (argc <= 2) {
+        std::cerr << "Usage: [infile] [outfile]" << std::endl;
+        return 1;
+    }
+
     // 1. Create and prepare the preamp instance
     Preamp myPreamp;
     myPreamp.prepare(SAMPLE_RATE);
@@ -23,26 +32,13 @@ int main() {
 
     myPreamp.setParameters(treble, mid, bass, vol1, gain, master);
 
-    // 3. Create a dummy input signal (e.g., an impulse)
-    std::vector<double> inputSignal(NUM_SAMPLES, 0.0);
-    inputSignal[10] = 1.0; // Impulse to check the response
-
-    // 4. Process the audio buffer
-    std::vector<double> outputSignal(NUM_SAMPLES);
-
-    std::cout << "Processing " << DURATION_SECONDS << " seconds of audio..." << std::endl;
-
-    for (int i = 0; i < NUM_SAMPLES; ++i) {
-        outputSignal[i] = myPreamp.processSample(inputSignal[i]);
-    }
-
-    std::cout << "Processing complete." << std::endl;
-    std::cout << "You can now write the 'outputSignal' vector to a .wav file to hear the result." << std::endl;
-
-    // Example: Print first few output samples
-    for (int i = 10; i < 30; ++i) {
-        std::cout << "Sample " << i << ": " << outputSignal[i] << std::endl;
-    }
+    processWavFile(
+        argv[1],
+        argv[2],
+        [&](double sample) -> double {
+            return myPreamp.processSample(sample);
+        }
+    );
 
     return 0;
 }
