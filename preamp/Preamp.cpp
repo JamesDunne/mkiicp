@@ -43,6 +43,61 @@ inline double tubeSaturate12AX7(double x, double drive, double bias, double Vp) 
     return output * 0.4;
 }
 
+/**
+ * @brief An advanced 12AX7 waveshaper that outputs a virtual AC plate voltage.
+ *
+ * This function models a tube stage based on its physical components, calculating
+ * the plate current and producing an output voltage swing based on the plate load resistor.
+ * This correctly models the inherent gain of the stage.
+ *
+ * @param x The input AC "virtual voltage" at the grid.
+ * @param bias The DC cathode bias point in Volts (e.g., -1.8V).
+ * @param V_supply The B+ supply voltage for the stage.
+ * @param R_L The plate load resistor value in Ohms.
+ * @return The resulting AC "virtual voltage" at the plate.
+ */
+inline double tubeSaturateVirtualVoltage(double x, double bias, double V_supply, double R_L) {
+    // --- Tube Parameters from SPICE Model ---
+    const double Mu = 96.20;  // Amplification Factor
+    const double Ex = 1.437;  // Power Law Exponent
+    const double KG1 = 613.4; // Plate Current Scaling Factor
+
+    // --- 1. Calculate Quiescent (DC) State ---
+    // Effective grid voltage at idle (no signal)
+    double Vgk_quiescent = bias;
+    double Vp_eff_quiescent = (V_supply / Mu) + Vgk_quiescent;
+    // Plate current at idle
+    double Ip_quiescent = 0.0;
+    if (Vp_eff_quiescent > 0.0) {
+        Ip_quiescent = pow(Vp_eff_quiescent, Ex) / KG1;
+    }
+
+    // --- 2. Calculate Dynamic (AC Signal) State ---
+    // Total grid-cathode voltage = AC input + DC bias
+    double Vgk_total = x + bias;
+
+    // Emulate grid conduction (clipping) when grid goes positive
+    if (Vgk_total > 0.0) {
+        // This models the grid acting like a diode and clamping the signal
+        Vgk_total = 1.1 * std::tanh(Vgk_total / 1.1);
+    }
+
+    // Effective grid voltage with signal
+    double Vp_eff_total = (V_supply / Mu) + Vgk_total;
+    // Plate current with signal
+    double Ip_total = 0.0;
+    if (Vp_eff_total > 0.0) {
+        Ip_total = pow(Vp_eff_total, Ex) / KG1;
+    }
+
+    // --- 3. Calculate Output Voltage ---
+    // The AC output voltage is the change in plate current multiplied by the load resistor.
+    // The negative sign represents the inverting nature of a common-cathode stage.
+    double V_out_ac = -(Ip_total - Ip_quiescent) * R_L;
+
+    return V_out_ac;
+}
+
 void make_lpf(IIRBiquad& filter, double sampleRate, double cutoff_freq) {
     if (cutoff_freq >= sampleRate / 2.0) { // Avoid aliasing issues
         filter.setCoefficients(1.0, 0.0, 0.0, 1.0, 0.0, 0.0); // Pass-through
@@ -87,7 +142,7 @@ void V1AStage::prepare(double sampleRate) {
     make_hpf(cathodeBypassFilter, sampleRate, 4.7);
     make_hpf(outputCouplingFilter, sampleRate, 1.6);
     make_lpf(interStageLPF, sampleRate, 12000.0); // Gentle roll-off
-    gain = 50.0;
+    bias = -1.8; V_supply = 405.0; R_L = 150e3;
     reset();
 }
 
@@ -99,8 +154,7 @@ void V1AStage::reset() {
 
 double V1AStage::process(double in) {
     double out = cathodeBypassFilter.process(in);
-    out = tubeSaturate12AX7(out, 1.0, -1.8, 230.0);
-    out *= gain;
+    out = tubeSaturateVirtualVoltage(out, bias, V_supply, R_L);
     out = outputCouplingFilter.process(out);
     out = interStageLPF.process(out);
     return out;
@@ -111,8 +165,7 @@ void V1BStage::prepare(double sampleRate) {
     make_hpf(cathodeBypassFilter, sampleRate, 4.8);
     make_hpf(outputCouplingFilter, sampleRate, 0.4);
     make_lpf(interStageLPF, sampleRate, 2900.0); // Initialize the LPF
-    // This stage expects the post-tonestack signal, so its gain can be modest.
-    gain = 25.0;
+    bias = -1.8; V_supply = 405.0; R_L = 100e3;
     reset();
 }
 
@@ -124,10 +177,8 @@ void V1BStage::reset() {
 
 double V1BStage::process(double in) {
     double out = cathodeBypassFilter.process(in);
-    out = tubeSaturate12AX7(out, 1.0, -1.8, 285.0);
+    out = tubeSaturateVirtualVoltage(out, bias, V_supply, R_L);
     out = outputCouplingFilter.process(out);
-    out *= gain;
-    // Apply the LPF at the very end of the stage's output
     out = interStageLPF.process(out);
     return out;
 }
@@ -140,6 +191,10 @@ void V3BV4AStage::prepare(double sampleRate) {
     make_lpf(fizzFilter, sampleRate, 3180.0);
     make_hpf(v4a_cathodeBypass, sampleRate, 220.0);
     make_hpf(v4a_outputCoupling, sampleRate, 15.0);
+    // V3B Parameters
+    v3b_bias = -2.0; v3b_V_supply = 410.0; v3b_R_L = 82e3;
+    // V4A Parameters
+    v4a_bias = -2.2; v4a_V_supply = 410.0; v4a_R_L = 274e3;
     reset();
 }
 
@@ -155,22 +210,23 @@ void V3BV4AStage::reset() {
 void V3BV4AStage::setGain(double g) {
     // Maps the [0,1] knob to a powerful gain factor [1x to 51x].
     // This is the core of the lead drive.
-    drive = 1.0 + 150.0 * (g * g);
+    drive = (g * g);
 }
 
 double V3BV4AStage::process(double in) {
-    // V3B acts as a clean booster whose output level is controlled by the 'drive' knob.
-    double out = v3b_inputFilter.process(in);
+    // Attenuate signal based on drive knob, then feed to V3B
+    double out = v3b_inputFilter.process(in * drive);
     out = v3b_cathodeBypass.process(out);
+    // V3B now adds gain and distortion
+    out = tubeSaturateVirtualVoltage(out, v3b_bias, v3b_V_supply, v3b_R_L);
+
+    // Signal passes through coupling network to V4A
     out = interStageHPF.process(out);
-    // v3b_plateVoltage = 300.0
-    out *= drive; // Apply the main lead gain here.
     out = fizzFilter.process(out);
 
     // V4A gets slammed by the high-level signal from V3B.
-    // This is where the heavy clipping happens.
     out = v4a_cathodeBypass.process(out);
-    out = tubeSaturate12AX7(out, 1.0, -2.0, 218.0);
+    out = tubeSaturateVirtualVoltage(out, v4a_bias, v4a_V_supply, v4a_R_L);
     out = v4a_outputCoupling.process(out);
 
     return out;
@@ -181,7 +237,7 @@ void V2AStage::prepare(double sampleRate) {
     make_hpf(inputCouplingFilter, sampleRate, 72.0);
     make_hpf(cathodeBypassFilter, sampleRate, 10.3);
     make_hpf(outputCouplingFilter, sampleRate, 3.4);
-    gain = 15.0;
+    bias = -1.5; V_supply = 410.0; R_L = 120e3;
     reset();
 }
 
@@ -196,18 +252,17 @@ void V2AStage::setMaster(double m) {
 
 double V2AStage::process(double in) {
     double out = inputCouplingFilter.process(in);
-
     out = cathodeBypassFilter.process(out);
-    out = tubeSaturate12AX7(out, 1.0, -1.5, 230.0);
-    out *= gain;
+    out = tubeSaturateVirtualVoltage(out, bias, V_supply, R_L);
     out = outputCouplingFilter.process(out);
+    // Master volume now acts as a simple attenuator on the virtual voltage
     return out * masterVol;
 }
 
 // --- V2B ---
 void V2BStage::prepare(double sampleRate) {
     make_hpf(outputCouplingFilter, sampleRate, 144.0);
-    gain = 1.0; // Unity gain buffer.
+    bias = -1.5; V_supply = 410.0; R_L = 100e3;
     reset();
 }
 
@@ -216,19 +271,19 @@ void V2BStage::reset() {
 }
 
 double V2BStage::process(double in) {
-    double out = tubeSaturate12AX7(in, 1.0, -1.5, 290.0);
+    double out = tubeSaturateVirtualVoltage(in, bias, V_supply, R_L);
     out = outputCouplingFilter.process(out);
-    return out * gain;
+    return out;
 }
 
 double Preamp::processSample(double in) {
     // Process through the chain
     double sample = v1a.process(in);
-
-    sample = toneStack.process(sample);
     measureMinMax(sample);
 
-#if 0
+    sample = toneStack.process(sample);
+
+#if 1
     double lead_path = v3b_v4a.process(sample);
 
     double rhythm_path = v1b.process(sample);
@@ -239,7 +294,7 @@ double Preamp::processSample(double in) {
     sample = v2a.process(sample);
     sample = v2b.process(sample);
 
-    sample *= 0.25;
+    sample /= 5000.0;
 #else
     sample /= 30.0;
 #endif

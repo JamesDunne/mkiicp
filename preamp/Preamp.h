@@ -19,7 +19,7 @@ private:
     IIRBiquad cathodeBypassFilter;
     IIRBiquad outputCouplingFilter;
     IIRBiquad interStageLPF;
-    double gain = 50.0;
+    double bias, V_supply, R_L;
 };
 
 class V1BStage {
@@ -32,7 +32,7 @@ private:
     IIRBiquad cathodeBypassFilter;
     IIRBiquad outputCouplingFilter;
     IIRBiquad interStageLPF;
-    double gain = 50.0;
+    double bias, V_supply, R_L;
 };
 
 class V3BV4AStage {
@@ -51,7 +51,9 @@ private:
     IIRBiquad v4a_cathodeBypass;
     IIRBiquad v4a_outputCoupling;
 
-    double drive = 0.75;
+    double drive;
+    double v3b_bias, v3b_V_supply, v3b_R_L;
+    double v4a_bias, v4a_V_supply, v4a_R_L;
 };
 
 class V2AStage {
@@ -65,8 +67,8 @@ private:
     IIRBiquad inputCouplingFilter;
     IIRBiquad cathodeBypassFilter;
     IIRBiquad outputCouplingFilter;
-    double gain = 50.0;
     double masterVol = 0.5;
+    double bias, V_supply, R_L;
 };
 
 class V2BStage {
@@ -77,7 +79,7 @@ public:
     double process(double in);
 private:
     IIRBiquad outputCouplingFilter;
-    double gain = 50.0;
+    double bias, V_supply, R_L;
 };
 
 // --- Main Preamp Class ---
