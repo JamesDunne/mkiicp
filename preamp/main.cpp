@@ -17,14 +17,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-#if 0
-    for (int i = 0; i < 1024; i++) {
-        double x = (i - 512) / 512.0;
-        double y = tubeSaturate12AX7(x, 1.0, 1.5, 210.0);
-        std::cout << x << "\t" << y << std::endl;
-    }
-#endif
-
     // 1. Create and prepare the preamp instance
     Preamp myPreamp;
     myPreamp.prepare(SAMPLE_RATE);
@@ -40,10 +32,19 @@ int main(int argc, char* argv[]) {
 
     myPreamp.setParameters(treble, mid, bass, vol1, gain, master);
 
+#if 1
+    for (int i = 0; i < 1024; i++) {
+        double x = (i - 512) / 512.0;
+        double y = myPreamp.v1a.process(x);
+        std::cout << x << "\t" << y << std::endl;
+    }
+#else
+
     processWavFile(
         argv[1],
         argv[2],
         [&](double sample) -> double {
+            //return myPreamp.v1a.process(sample);
             return myPreamp.processSample(sample);
         }
     );
@@ -54,6 +55,7 @@ int main(int argc, char* argv[]) {
     myPreamp.mm_toneStack.printMinMax();
     std::cout << "out: ";
     myPreamp.mm_output.printMinMax();
+#endif
 
     return 0;
 }

@@ -31,7 +31,7 @@ public:
     void prepare(double sampleRate);
     void setParameters(double treble, double mid, double bass, double vol1, double gain, double master);
     double processSample(double in);
-private:
+public:
     double lead_drive;
     double master_vol;
 
