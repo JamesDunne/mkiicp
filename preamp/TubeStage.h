@@ -4,28 +4,29 @@
 class TubeStage {
 public:
     TubeStage();
-    void prepare(double sampleRate, double R_k, double R_L, double V_supply);
+    // New signature: Now takes bypass capacitance C_k. 0.0 means unbypassed.
+    void prepare(double sampleRate, double R_k, double R_L, double V_supply, double C_k);
     void reset();
     double process(double in);
 
 private:
-    void solveDC(); // Solves for the quiescent operating point
+    void solveDC();
 
-    // --- Physical Parameters ---
-    double R_k, R_L, V_supply;
+    // Physical Parameters
+    double R_k, R_L, V_supply, C_k;
+    bool isBypassed;
 
-    // --- SPICE Model Constants ---
+    // SPICE Model Constants
     const double Mu = 96.20, Ex = 1.437, KG1 = 613.4, KP = 740.3, KVB = 1672.0;
 
-    // --- Solved DC Operating Point ---
-    double Vp_dc; // Quiescent Plate Voltage
-    double Vk_dc; // Quiescent Cathode Voltage
-    double Ip_q;  // Quiescent Plate Current
+    // Solved DC Operating Point
+    double Vp_dc;
+    double Ip_q;
 
-    // --- Real-time State ---
-    double last_Ip; // Plate current from the previous sample
+    // Filters managed by the stage itself
+    IIRBiquad cathodeBypassFilter;
 
 public:
-    // Filters are now public to be configured by the main Preamp class
-    IIRBiquad inputFilter, outputFilter, cathodeBypass, interStageLPF;
+    // Public filters for inter-stage coupling, configured externally
+    IIRBiquad inputFilter, outputFilter, interStageLPF;
 };

@@ -1,26 +1,42 @@
 #include "TubeStage.h"
+
+#include <numbers>
 #include <ostream>
+
+void make_lpf(IIRBiquad& filter, double sampleRate, double cutoff_freq);
+void make_hpf(IIRBiquad& filter, double sampleRate, double cutoff_freq);
 
 TubeStage::TubeStage() {
     reset();
 }
 
-void TubeStage::prepare(double sampleRate, double r_k, double r_l, double v_supply) {
+void TubeStage::prepare(double sampleRate, double r_k, double r_l, double v_supply, double c_k) {
     R_k = r_k;
     R_L = r_l;
     V_supply = v_supply;
-    solveDC(); // Calculate the operating point once
+    C_k = c_k;
+    isBypassed = (C_k > 1e-12); // Is there a bypass cap?
+
+    if (isBypassed) {
+        // Calculate cutoff freq of the bypass RC network
+        double cutoff_freq = 1.0 / (2.0 * std::numbers::pi * R_k * C_k);
+        make_lpf(cathodeBypassFilter, sampleRate, cutoff_freq);
+    }
+
+    solveDC();
     reset();
 }
 
 void TubeStage::reset() {
-    // Reset filters
     inputFilter.reset();
     outputFilter.reset();
-    cathodeBypass.reset();
     interStageLPF.reset();
-    // Reset state to the solved DC point
-    last_Ip = Ip_q;
+    cathodeBypassFilter.reset();
+    if (Ip_q > 0) {
+        // Prime the LPF state with the DC cathode voltage to prevent startup thumps
+        cathodeBypassFilter.process(Ip_q * R_k);
+        cathodeBypassFilter.process(Ip_q * R_k);
+    }
 }
 
 // Calculates the quiescent (DC) plate current using an iterative solver.
@@ -49,42 +65,40 @@ void TubeStage::solveDC() {
 
 // Processes one sample using the stateful SPICE model
 double TubeStage::process(double V_in_ac) {
-    // Start our guess for the current sample's plate current with the quiescent one.
     double current_Ip = Ip_q;
 
-    // Iterative solver to find the stable plate current for this sample
     for (int i = 0; i < 5; ++i) {
-        // 1. Direct and stable formulation for inter-electrode voltages
-        double V_pk = V_supply - current_Ip * (R_L + R_k);
-        double V_gk = V_in_ac - current_Ip * R_k;
+        // 1. Calculate the raw, unfiltered voltage that would appear at the cathode
+        double Vk_unfiltered = current_Ip * R_k;
 
-        // 2. Physical Limits and Grid Conduction
-        V_pk = std::max(0.0, V_pk);
-
-        if (V_gk > 0.0) {
-            V_gk = 1.1 * std::tanh(V_gk / 1.1);
+        // 2. Determine the actual cathode voltage by applying the bypass filter
+        double V_k;
+        if (isBypassed) {
+            // The LPF smooths the cathode voltage, shorting AC components to ground
+            V_k = cathodeBypassFilter.process(Vk_unfiltered);
+        } else {
+            // If unbypassed, the full voltage is present
+            V_k = Vk_unfiltered;
         }
 
-        // 3. Calculate the target plate current
+        // 3. Calculate inter-electrode voltages based on this correct V_k
+        double V_pk = V_supply - current_Ip * R_L - V_k;
+        double V_gk = V_in_ac - V_k;
+
+        V_pk = std::max(0.0, V_pk);
+        if (V_gk > 0.0) { V_gk = 1.1 * std::tanh(V_gk / 1.1); }
+
+        // 4. Calculate target plate current
         double e1_arg = KP * (1.0 / Mu + V_gk / sqrt(KVB + V_pk * V_pk));
         double E1 = (e1_arg > 30.0) ? (V_pk / KP * e1_arg) : (V_pk / KP * log(1.0 + exp(e1_arg)));
         double target_Ip = pow(std::max(0.0, E1), Ex) / KG1;
 
-        // 4. Damped Update
+        // 5. Damped Update
         current_Ip += (target_Ip - current_Ip) * 0.5;
     }
 
-    // 5. Update the state for the next sample.
-    // NOTE: This was a bug in the previous version. We must use the *converged* current.
-    // The `last_Ip` state is not needed inside the loop.
-    // last_Ip = current_Ip; // This was wrong logic. The converged current is what matters.
-
-    // --- 6. The Numerically Stable Output Calculation ---
-    // Calculate the AC component of the current (Total - DC)
+    // 6. Numerically Stable Output Calculation
     double I_ac = current_Ip - Ip_q;
-
-    // The AC output voltage is the result of the AC current flowing through the plate resistor.
-    // The negative sign represents the inverting nature of the common-cathode stage.
     double V_out_ac = -I_ac * R_L;
 
     return V_out_ac;
