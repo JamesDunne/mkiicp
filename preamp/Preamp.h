@@ -103,7 +103,7 @@ private:
     IIRBiquad fizzFilter;
     IIRBiquad v3b_inputFilter;
     IIRBiquad v3b_cathodeBypass;
-    IIRBiquad v3b_outputCoupling;
+    IIRBiquad interStageHPF;
     double v3b_gain = 28.0;
 
     IIRBiquad v4a_cathodeBypass;
@@ -121,6 +121,7 @@ public:
     void setMaster(double master);
     double process(double in);
 private:
+    IIRBiquad inputCouplingFilter;
     IIRBiquad cathodeBypassFilter;
     IIRBiquad outputCouplingFilter;
     double gain = 15.0;

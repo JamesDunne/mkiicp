@@ -89,7 +89,7 @@ void make_hpf(IIRBiquad& filter, double sampleRate, double cutoff_freq) {
 // --- V1A ---
 void V1AStage::prepare(double sampleRate) {
     make_hpf(cathodeBypassFilter, sampleRate, 4.7);
-    make_hpf(outputCouplingFilter, sampleRate, 31.0);
+    make_hpf(outputCouplingFilter, sampleRate, 1.6);
     make_lpf(interStageLPF, sampleRate, 12000.0); // Gentle roll-off
     // Let's give V1A a more realistic "hot" gain before the tone stack.
     gain = 15.0;
@@ -105,8 +105,8 @@ void V1AStage::reset() {
 double V1AStage::process(double in) {
     double out = cathodeBypassFilter.process(in);
     out = tubeSaturate12AX7(out, 1.0, -1.8);
-    out = outputCouplingFilter.process(out);
     out *= gain;
+    out = outputCouplingFilter.process(out);
     // Apply final gentle LPF
     out = interStageLPF.process(out);
     return out;
@@ -263,9 +263,9 @@ double V1BStage::process(double in) {
 
 // --- V3B and V4A (Lead Gain) ---
 void V3BV4AStage::prepare(double sampleRate) {
-    make_hpf(v3b_inputFilter, sampleRate, 5.0);
+    make_hpf(v3b_inputFilter, sampleRate, 5.3);
     make_hpf(v3b_cathodeBypass, sampleRate, 48.2);
-    make_hpf(v3b_outputCoupling, sampleRate, 26.0);
+    make_hpf(interStageHPF, sampleRate, 133.0);
     make_lpf(fizzFilter, sampleRate, 3180.0);
     make_hpf(v4a_cathodeBypass, sampleRate, 220.0);
     make_hpf(v4a_outputCoupling, sampleRate, 15.0);
@@ -275,7 +275,7 @@ void V3BV4AStage::prepare(double sampleRate) {
 void V3BV4AStage::reset() {
     v3b_inputFilter.reset();
     v3b_cathodeBypass.reset();
-    v3b_outputCoupling.reset();
+    interStageHPF.reset();
     fizzFilter.reset();
     v4a_cathodeBypass.reset();
     v4a_outputCoupling.reset();
@@ -293,12 +293,13 @@ double V3BV4AStage::process(double in) {
     out = v3b_cathodeBypass.process(out);
     out *= drive; // Apply the main lead gain here.
 
+    out = interStageHPF.process(out);
     out = fizzFilter.process(out);
 
     // V4A gets slammed by the high-level signal from V3B.
     // This is where the heavy clipping happens.
     out = v4a_cathodeBypass.process(out);
-    out = tubeSaturate12AX7(out, 1.0, -2.0); // Drive is 1.0 as the signal is already huge.
+    out = tubeSaturate12AX7(out, 1.0, -2.0);
     out = v4a_outputCoupling.process(out);
 
     return out;
@@ -306,6 +307,7 @@ double V3BV4AStage::process(double in) {
 
 // --- V2A ---
 void V2AStage::prepare(double sampleRate) {
+    make_hpf(inputCouplingFilter, sampleRate, 72.0);
     make_hpf(cathodeBypassFilter, sampleRate, 10.3);
     make_hpf(outputCouplingFilter, sampleRate, 3.4);
     gain = 1.5; // This stage is a recovery/driver stage.
@@ -322,9 +324,12 @@ void V2AStage::setMaster(double m) {
 }
 
 double V2AStage::process(double in) {
-    double out = cathodeBypassFilter.process(in);
+    double out = inputCouplingFilter.process(in);
+
+    out = cathodeBypassFilter.process(out);
     out = tubeSaturate12AX7(out, 1.0, -1.5);
     out *= gain;
+    out = outputCouplingFilter.process(out);
     return out * masterVol;
 }
 
