@@ -1,124 +1,71 @@
 #include "TubeStage.h"
-#include <cmath>
-#include <numbers>
 #include <algorithm>
 
-// Assumes make_lpf utility function is available
-void make_lpf(IIRBiquad& filter, double sampleRate, double cutoff_freq);
-
-TubeStage::TubeStage() { reset(); }
+TubeStage::TubeStage() {
+    R_k = 1.5e3; R_L = 100e3; V_supply = 400.0;
+    isBypassed = false;
+    Vp_dc = 0.0; r_p = 0.0; R_out = 0.0; gain = 0.0;
+}
 
 void TubeStage::prepare(double sampleRate, double r_k, double r_l, double v_supply, double c_k) {
-    R_k = r_k;
-    R_L = r_l;
-    V_supply = v_supply;
+    R_k = r_k; R_L = r_l; V_supply = v_supply;
     isBypassed = (c_k > 1e-12);
 
-    if (isBypassed) {
-        double cutoff_freq = 1.0 / (2.0 * std::numbers::pi * R_k * c_k);
-        make_lpf(cathodeFilter, sampleRate, cutoff_freq);
-    }
-
-    solveDC(); // Calculate the static DC operating point
-    reset();   // Reset all stateful components
+    calculateOperatingPoint();
 }
 
 void TubeStage::reset() {
-    // Prime the LPF state with the DC cathode voltage to prevent startup thumps.
-    // This must be done after solveDC() has calculated Ip_q.
-    if (isBypassed && Ip_q > 0) {
-        double Vk_dc = Ip_q * R_k;
-        cathodeFilter.reset();
-
-        // To prime a Direct Form 1 IIR filter, we set its state variables (x1, y1)
-        // such that for a constant input of Vk_dc, the output is also Vk_dc.
-        // This is achieved by setting the past states equal to the DC value.
-        // We'll add a simple `prime` method to IIRBiquad for this.
-        // For now, let's process it for a long time to settle it.
-        for(int i=0; i<10000; ++i) {
-            cathodeFilter.process(Vk_dc);
-        }
-    }
+    // This model is stateless, so reset does nothing.
 }
 
-void TubeStage::solveDC() {
-    double Ip_q = 0.0008; // Start with a reasonable guess.
-
-    // This bisection search is guaranteed to converge on the correct Vgk.
+// Calculates DC operating point using robust load-line analysis.
+void TubeStage::calculateOperatingPoint() {
+    constexpr double KP = 740.3, KVB = 1672.0, KG1 = 613.4, Ex = 1.437;
+    double Ip_q = 0.0008;
+    double V_gk = -1.5;
     double min_V_gk = -10.0, max_V_gk = 0.0;
-    double V_gk = -1.5; // A typical starting point for Vgk
 
     for (int i = 0; i < 15; ++i) {
-        // From V_gk, find the current the tube "wants" to draw.
-        // This must use the full plate voltage equation.
+        V_gk = 0.5 * (min_V_gk + max_V_gk);
         double V_p = V_supply - (-V_gk / R_k) * R_L;
-        double V_pk = V_p + V_gk; // Vp - Vk = Vp - (-Vgk)
+        double V_pk = V_p + V_gk;
         V_pk = std::max(0.0, V_pk);
 
-        const double KP = 740.3, KVB = 1672.0;
         double e1_arg = KP * (1.0 / Mu + V_gk / sqrt(KVB + V_pk * V_pk));
-        double E1 = (e1_arg > 30.0) ? (V_pk / KP * e1_arg) : (V_pk / KP * log(1.0 + exp(e1_arg)));
-
-        const double KG1 = 613.4, Ex = 1.437;
+        double E1 = (e1_arg > 30.0) ? (V_pk/KP*e1_arg) : (V_pk/KP*log(1.0+exp(e1_arg)));
         double Ip_from_tube = pow(std::max(0.0, E1), Ex) / KG1;
-
-        // From V_gk, find the current the circuit "allows" via the load line.
         double Ip_from_circuit = -V_gk / R_k;
 
-        // Adjust the search range.
-        if (Ip_from_tube > Ip_from_circuit) {
-            max_V_gk = V_gk;
-        } else {
-            min_V_gk = V_gk;
-        }
-        V_gk = 0.5 * (min_V_gk + max_V_gk);
+        if (Ip_from_tube > Ip_from_circuit) max_V_gk = V_gk;
+        else min_V_gk = V_gk;
     }
 
-    // After converging, V_gk is our quiescent grid-cathode voltage.
-    this->Ip_q = -V_gk / R_k;
-    this->Vp_dc = V_supply - this->Ip_q * R_L;
+    Ip_q = -V_gk / R_k;
+    Vp_dc = V_supply - Ip_q * R_L;
+
+    double gm = (Ip_q > 0) ? (Ex * Ip_q / std::max(0.001, (V_supply / Mu) + V_gk)) : 0.0;
+    r_p = Mu / (gm + 1e-12);
+    R_out = (r_p * R_L) / (r_p + R_L);
+
+    double Zk_ac = isBypassed ? 0.0 : R_k;
+    gain = (Mu * R_L) / (R_L + r_p + Zk_ac * (Mu + 1.0));
 }
 
-double TubeStage::process(double V_in_ac) {
-    // For a zero input signal, the tube should be at its DC resting point.
-    // The iterative solver must converge to Ip_q.
-    if (std::abs(V_in_ac) < 1e-9) {
-        // If the input is silent, we don't need to solve.
-        // We also must ensure the cathode filter state remains at DC.
-        if (isBypassed) {
-            cathodeFilter.process(Ip_q * R_k);
-        }
-        return Vp_dc;
+// Processes a sample using the calculated Thevenin model and soft saturation.
+double TubeStage::process(double V_in_ac, double R_load) {
+    double loaded_gain = gain * (R_load / (R_out + R_load));
+    double V_out_linear = -V_in_ac * loaded_gain;
+
+    double V_headroom = V_supply - Vp_dc;
+    double V_footroom = Vp_dc;
+    double k = 20.0; // Softness factor: higher is softer
+
+    double V_out_ac = 0.0;
+    if (V_out_linear > 0) {
+        V_out_ac = V_headroom * (V_out_linear / sqrt(V_out_linear * V_out_linear + V_headroom * V_headroom / (k * k)));
+    } else {
+        V_out_ac = V_footroom * (V_out_linear / sqrt(V_out_linear * V_out_linear + V_footroom * V_footroom / (k * k)));
     }
 
-    double current_Ip = Ip_q; // Start solver at the known DC quiescent current.
-
-    for (int i = 0; i < 5; ++i) {
-        // Calculate the raw, unfiltered voltage that *would* appear at the cathode.
-        double Vk_unfiltered = current_Ip * R_k;
-
-        // Determine the actual cathode voltage by applying the bypass LPF.
-        double V_k = isBypassed ? cathodeFilter.process(Vk_unfiltered) : Vk_unfiltered;
-
-        // Calculate inter-electrode voltages using the correct, filtered V_k.
-        double V_pk = V_supply - (current_Ip * R_L) - V_k;
-        double V_gk = V_in_ac - V_k;
-
-        V_pk = std::max(0.0, V_pk);
-        if (V_gk > 0.0) { V_gk = 1.1 * std::tanh(V_gk / 1.1); }
-
-        // Calculate target plate current using the full, correct SPICE formula.
-        const double KP = 740.3, KVB = 1672.0;
-        double e1_arg = KP * (1.0 / Mu + V_gk / sqrt(KVB + V_pk * V_pk));
-        double E1 = (e1_arg > 30.0) ? (V_pk / KP * e1_arg) : (V_pk / KP * log(1.0 + exp(e1_arg)));
-
-        const double KG1 = 613.4, Ex = 1.437;
-        double target_Ip = pow(std::max(0.0, E1), Ex) / KG1;
-
-        // Damped Update
-        current_Ip += (target_Ip - current_Ip) * 0.5;
-    }
-
-    // Return the total, instantaneous plate voltage.
-    return V_supply - current_Ip * R_L;
+    return Vp_dc + V_out_ac;
 }

@@ -4,7 +4,7 @@
 class ToneStack {
 public:
     ToneStack();
-    void prepare(double sampleRate);
+    void prepare(double sampleRate, double v1a_Vp_dc);
     void reset();
     void setParams(double treble, double mid, double bass, double volume);
     double process(double in);
@@ -17,6 +17,5 @@ private:
 
     IIRBiquad filter;
     IIRBiquad dcBlocker;
-
     double vol_gain;
 };
