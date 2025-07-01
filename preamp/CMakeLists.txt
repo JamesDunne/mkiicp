@@ -10,4 +10,6 @@ add_executable(preamp main.cpp
         wav.cpp
         ToneStack.cpp
         ToneStack.h
-        IIRFilter.h)
+        IIRFilter.h
+        TubeStage.cpp
+        TubeStage.h)

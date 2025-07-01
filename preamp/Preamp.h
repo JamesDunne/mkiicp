@@ -1,121 +1,14 @@
 #pragma once
 
-#include "IIRBiquad.h"
-#include "ToneStack.h"
 #include <iostream>
 #include <ostream>
 
-double tubeSaturate12AX7(double x, double drive, double bias, double Vp);
+#include "ToneStack.h"
+#include "TubeStage.h"
 
-// --- Individual Stage Classes ---
-
-class V1AStage {
+class MinMax {
 public:
-    V1AStage() = default;
-    void prepare(double sampleRate);
-    void reset();
-    double process(double in);
-private:
-    IIRBiquad cathodeBypassFilter;
-    IIRBiquad outputCouplingFilter;
-    IIRBiquad interStageLPF;
-    double bias, V_supply, R_L;
-};
-
-class V1BStage {
-public:
-    V1BStage() = default;
-    void prepare(double sampleRate);
-    void reset();
-    double process(double in);
-private:
-    IIRBiquad cathodeBypassFilter;
-    IIRBiquad outputCouplingFilter;
-    IIRBiquad interStageLPF;
-    double bias, V_supply, R_L;
-};
-
-class V3BV4AStage {
-public:
-    V3BV4AStage() = default;
-    void prepare(double sampleRate);
-    void reset();
-    void setGain(double gain);
-    double process(double in);
-private:
-    IIRBiquad fizzFilter;
-    IIRBiquad v3b_inputFilter;
-    IIRBiquad v3b_cathodeBypass;
-    IIRBiquad interStageHPF;
-
-    IIRBiquad v4a_cathodeBypass;
-    IIRBiquad v4a_outputCoupling;
-
-    double drive;
-    double v3b_bias, v3b_V_supply, v3b_R_L;
-    double v4a_bias, v4a_V_supply, v4a_R_L;
-};
-
-class V2AStage {
-public:
-    V2AStage() = default;
-    void prepare(double sampleRate);
-    void reset();
-    void setMaster(double master);
-    double process(double in);
-private:
-    IIRBiquad inputCouplingFilter;
-    IIRBiquad cathodeBypassFilter;
-    IIRBiquad outputCouplingFilter;
-    double masterVol = 0.5;
-    double bias, V_supply, R_L;
-};
-
-class V2BStage {
-public:
-    V2BStage() = default;
-    void prepare(double sampleRate);
-    void reset();
-    double process(double in);
-private:
-    IIRBiquad outputCouplingFilter;
-    double bias, V_supply, R_L;
-};
-
-// --- Main Preamp Class ---
-
-class Preamp {
-public:
-    Preamp() = default;
-
-    void prepare(double sampleRate) {
-        v1a.prepare(sampleRate);
-        toneStack.prepare(sampleRate);
-        v1b.prepare(sampleRate);
-        v3b_v4a.prepare(sampleRate);
-        v2a.prepare(sampleRate);
-        v2b.prepare(sampleRate);
-        reset(); // Ensure a clean state on preparation
-    }
-
-    void reset() {
-        m_min = 1.0; m_max = -1.0;
-
-        v1a.reset();
-        toneStack.reset();
-        v1b.reset();
-        v3b_v4a.reset();
-        v2a.reset();
-        v2b.reset();
-    }
-
-    void setParameters(double treble, double mid, double bass, double vol1, double gain, double master) {
-        toneStack.setParams(treble, mid, bass, vol1);
-        v3b_v4a.setGain(gain);
-        v2a.setMaster(master);
-    }
-
-    double processSample(double in);
+    MinMax() : m_min(1.0e6), m_max(-1.0e6) {}
 
     void measureMinMax(double sample) {
         if (sample < m_min) m_min = sample;
@@ -127,12 +20,23 @@ public:
     }
 
 private:
-    V1AStage v1a;
-    ToneStack toneStack;
-    V1BStage v1b;
-    V3BV4AStage v3b_v4a;
-    V2AStage v2a;
-    V2BStage v2b;
-
     double m_min,m_max;
+};
+
+// --- Main Preamp Class ---
+
+class Preamp {
+public:
+    Preamp();
+    void prepare(double sampleRate);
+    void setParameters(double treble, double mid, double bass, double vol1, double gain, double master);
+    double processSample(double in);
+private:
+    double lead_drive;
+    double master_vol;
+
+    TubeStage v1a, v1b, v3b, v4a, v2a, v2b;
+    ToneStack toneStack;
+public:
+    MinMax mm_v1a, mm_toneStack;
 };
