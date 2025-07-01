@@ -21,6 +21,11 @@ public:
             << std::setprecision(6) << m_max << std::endl;
     }
 
+    void reset() {
+        m_min = 1.0e6;
+        m_max = -1.0e6;
+    }
+
 private:
     double m_min,m_max;
 };
@@ -51,5 +56,5 @@ private:
     IIRBiquad v2b_output_hpf;
 
 public:
-    MinMax mm_v1a, mm_toneStack, mm_v1b, mm_v3b, mm_v4a, mm_v2a, mm_output;
+    MinMax mm_v1a, mm_toneStack, mm_v1b, mm_v3b_in, mm_v3b_out, mm_v4a_in, mm_v4a_out, mm_v2a_in, mm_v2a_out, mm_output;
 };
