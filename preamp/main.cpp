@@ -52,6 +52,8 @@ int main(int argc, char* argv[]) {
     myPreamp.mm_v1a.printMinMax();
     std::cout << "tone: ";
     myPreamp.mm_toneStack.printMinMax();
+    std::cout << "out: ";
+    myPreamp.mm_output.printMinMax();
 
     return 0;
 }

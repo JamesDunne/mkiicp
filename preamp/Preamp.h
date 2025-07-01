@@ -38,5 +38,5 @@ private:
     TubeStage v1a, v1b, v3b, v4a, v2a, v2b;
     ToneStack toneStack;
 public:
-    MinMax mm_v1a, mm_toneStack;
+    MinMax mm_v1a, mm_toneStack, mm_v1b, mm_output;
 };

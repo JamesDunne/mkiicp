@@ -92,40 +92,37 @@ double Preamp::processSample(double in) {
 
     // Input Stage -> Tone Stack
     double sample = v1a.process(input_voltage);
-    mm_v1a.measureMinMax(sample);
-    sample /= 1000.0;
-
-#if 0
     sample = v1a.outputFilter.process(sample);
     sample = v1a.interStageLPF.process(sample);
+    mm_v1a.measureMinMax(sample);
     sample = toneStack.process(sample);
     mm_toneStack.measureMinMax(sample);
 
     // Rhythm Path
-    double rhythm_path = v1b.cathodeBypass.process(sample);
+    double rhythm_path = v1b.inputFilter.process(sample);
     rhythm_path = v1b.process(rhythm_path);
     rhythm_path = v1b.interStageLPF.process(rhythm_path);
-    
+
     // Lead Path
-    double lead_path = sample * lead_drive; // Drive knob attenuates signal before V3B
+    double lead_path = sample * lead_drive;
     lead_path = v3b.inputFilter.process(lead_path);
-    lead_path = v3b.cathodeBypass.process(lead_path);
-    lead_path = v3b.process(lead_path); // V3B adds gain/distortion
-    
-    lead_path = v4a.inputFilter.process(lead_path); // Models coupling network
-    lead_path = v4a.cathodeBypass.process(lead_path);
-    lead_path = v4a.process(lead_path); // V4A adds more gain/distortion
+    lead_path = v3b.process(lead_path);
+
+    lead_path = v4a.inputFilter.process(lead_path);
+    lead_path = v4a.process(lead_path);
+    lead_path = v4a.interStageLPF.process(lead_path);
 
     // Mixdown and Final Stages
     sample = lead_path * 0.8 + rhythm_path * 0.2;
     sample = v2a.inputFilter.process(sample);
-    sample = v2a.cathodeBypass.process(sample);
-    sample = v2a.process(sample) * master_vol; // Master volume attenuates
+    sample = v2a.process(sample) * master_vol;
     
     sample = v2b.inputFilter.process(sample);
     sample = v2b.process(sample);
     sample = v2b.outputFilter.process(sample);
-#endif
+
+    sample /= 600.0;
+    mm_output.measureMinMax(sample);
 
     // Final attenuation to bring virtual voltage back to audio level
     return sample;
