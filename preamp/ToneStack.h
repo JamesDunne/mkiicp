@@ -16,5 +16,7 @@ private:
     double p_treble, p_mid, p_bass, p_vol;
 
     IIRBiquad filter;
+    IIRBiquad dcBlocker;
+
     double vol_gain;
 };

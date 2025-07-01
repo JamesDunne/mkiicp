@@ -4,6 +4,8 @@
 
 // --- Tone Stack (Final, Stable Biquad Model) ---
 
+void make_hpf(IIRBiquad& filter, double sampleRate, double cutoff_freq);
+
 ToneStack::ToneStack() { /* ... constructor ... */ }
 
 void ToneStack::prepare(double sampleRate) {
@@ -20,6 +22,7 @@ void ToneStack::setParams(double treble, double mid, double bass, double volume)
     p_treble = treble; p_mid = mid; p_bass = bass; p_vol = volume;
     calculateCoefficients();
     vol_gain = p_vol * p_vol;
+    make_hpf(dcBlocker, sampleRate, 1.0);
 }
 
 /**
@@ -82,7 +85,12 @@ void ToneStack::calculateCoefficients() {
 }
 
 double ToneStack::process(double in) {
-    // Process through the single, accurate filter and apply volume
-    // The insertion loss is now correctly modeled by the filter coefficients.
-    return filter.process(in) * vol_gain;
+    // First, process the signal through the EQ filter.
+    double out = filter.process(in);
+
+    // Then, apply the volume control.
+    out *= vol_gain;
+
+    // Finally, remove the DC offset.
+    return dcBlocker.process(out);
 }

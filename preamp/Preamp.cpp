@@ -80,6 +80,18 @@ void Preamp::prepare(double sampleRate) {
     // Mixer and Final Stage Filters
     make_lpf(mixer_output_lpf, sampleRate, 3400.0); // R11/C11 network
     make_hpf(v2b_output_hpf, sampleRate, 144.0); // Final output coupling cap
+
+    for (int i=0; i<1000; i++) {
+        v1a_pre_ts_lpf.process(v1a.getVpDC());
+        toneStack.process(v1a.getVpDC());
+        v1b_to_rhythm_lpf.process(v1b.getVpDC());
+        ts_to_v3b_hpf.process(0);
+        v3b_to_v4a_hpf.process(v3b.getVpDC());
+        v3b_to_v4a_lpf.process(v3b.getVpDC());
+        v4a_to_mixer_hpf.process(v4a.getVpDC());
+        mixer_output_lpf.process(0);
+        v2b_output_hpf.process(0);
+    }
 }
 
 void Preamp::setParameters(double treble, double mid, double bass, double vol1, double gain, double master) {
@@ -95,11 +107,12 @@ double Preamp::processSample(double in) {
     sample = v1a.process(sample);
     sample = v1a_pre_ts_lpf.process(sample);
     mm_v1a.measureMinMax(sample);
+    double v1a_out = sample;
     sample = toneStack.process(sample);
     mm_toneStack.measureMinMax(sample);
 
 #if 1
-    return sample / 80.0;
+    return v1a_out / 311.0;
 #else
     sample = v1b.process(sample);
     double v1b_out = sample; // Signal at the split point (N001)
