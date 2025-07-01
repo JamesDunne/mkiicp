@@ -226,6 +226,7 @@ double Preamp::processSample(double in) {
     double sample = v1a.process(in);
 
     sample = toneStack.process(sample);
+    measureMinMax(sample);
 
 #if 0
     double lead_path = v3b_v4a.process(sample);
@@ -240,9 +241,8 @@ double Preamp::processSample(double in) {
 
     sample *= 0.25;
 #else
-    sample /= 2.5;
+    sample /= 30.0;
 #endif
-    measureMinMax(sample);
 
     return sample;
 }

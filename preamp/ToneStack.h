@@ -1,12 +1,5 @@
-//
-// Created by Jim Dunne on 6/30/25.
-//
-
 #pragma once
-
-#include "IIRBiquad.h" // We'll go back to the trusty biquad
-
-// ... other class definitions ...
+#include "IIRBiquad.h"
 
 class ToneStack {
 public:
@@ -22,7 +15,6 @@ private:
     double sampleRate;
     double p_treble, p_mid, p_bass, p_vol;
 
-    IIRBiquad bassMidFilter;   // Models the main body of the tone
-    IIRBiquad trebleFilter;    // Models the bright cap and treble control
-    double volumeGain;
+    IIRBiquad filter;
+    double vol_gain;
 };
