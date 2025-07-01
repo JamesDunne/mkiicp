@@ -7,4 +7,7 @@ add_executable(preamp main.cpp
         IIRBiquad.h
         Preamp.h
         Preamp.cpp
-        wav.cpp)
+        wav.cpp
+        ToneStack.cpp
+        ToneStack.h
+        IIRFilter.h)

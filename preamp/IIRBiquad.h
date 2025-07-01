@@ -1,7 +1,5 @@
 #pragma once
 
-#include <cmath>
-
 // A standard Direct Form 1 IIR Biquad filter.
 class IIRBiquad {
 public:

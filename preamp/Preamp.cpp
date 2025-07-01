@@ -1,5 +1,9 @@
-#include "Preamp.h"
+
 #include <numbers>
+
+#include "Preamp.h"
+#include "ToneStack.h"
+#include "IIRFilter.h"
 
 constexpr double PI = std::numbers::pi;
 
@@ -91,8 +95,7 @@ void V1AStage::prepare(double sampleRate) {
     make_hpf(cathodeBypassFilter, sampleRate, 4.7);
     make_hpf(outputCouplingFilter, sampleRate, 1.6);
     make_lpf(interStageLPF, sampleRate, 12000.0); // Gentle roll-off
-    // Let's give V1A a more realistic "hot" gain before the tone stack.
-    gain = 15.0;
+    gain = 50.0;
     reset();
 }
 
@@ -107,132 +110,8 @@ double V1AStage::process(double in) {
     out = tubeSaturate12AX7(out, 1.0, -1.8);
     out *= gain;
     out = outputCouplingFilter.process(out);
-    // Apply final gentle LPF
     out = interStageLPF.process(out);
     return out;
-}
-
-// --- Tone Stack ---
-void ToneStack::prepare(double sampleRate) {
-    this->sampleRate = sampleRate;
-    calculateCoefficients();
-    reset();
-}
-
-void ToneStack::reset() {
-    m_s_c56 = m_s_c4 = m_s_c3 = m_s_c13b = 0.0;
-}
-
-void ToneStack::setParams(double treble, double mid, double bass, double volume) {
-    // Clamp input parameters to the [0, 1] range
-    treble_p = std::clamp(treble, 0.0, 1.0);
-    bass_p = std::clamp(bass, 0.0, 1.0);
-    mid_p = std::clamp(mid, 0.0, 1.0);
-    volume_p = std::clamp(volume, 0.0, 1.0);
-    // analog tapers:
-    treble_p *= treble_p;
-    bass_p *= bass_p;
-    mid_p *= mid_p;
-    volume_p *= volume_p;
-    calculateCoefficients();
-}
-
-void ToneStack::calculateCoefficients() {
-    // --- Stabilize Potentiometer Travel ---
-    // To prevent the MNA matrix from becoming singular, we must prevent any
-    // resistance from becoming a perfect zero. We map the user's [0,1] range
-    // to a slightly smaller internal range, e.g., [0.001, 0.999].
-    const double travel_min = 0.001;
-    const double travel_max = 1.0 - travel_min;
-    double treble_t = treble_p * travel_max + travel_min;
-    double volume_t = volume_p * travel_max + travel_min;
-
-    // --- Define Component Values and Epsilon for Stability ---
-    const double epsilon = 1e-12;
-
-    const double C56 = 1.0e-9;
-    const double C4 = 1.0e-7;
-    const double C3 = 4.7e-8;
-    const double C13B = 1.8e-10;
-
-    // --- Calculate Component Conductances (G = 1/R) ---
-    m_g_r5 = 1.0 / 100000.0;
-    const double g_r5a = 1.0 / 100000.0;
-
-    double r_treble_a = 250000.0 * (1.0 - treble_t);
-    double r_treble_c = 250000.0 * treble_t;
-    double g_treble_a = 1.0 / (r_treble_a); // No epsilon needed due to travel clamp
-    double g_treble_c = 1.0 / (r_treble_c);
-
-    double r_bass_a = 250000.0 * bass_p;
-    double g_bass_a = 1.0 / (r_bass_a + epsilon); // Epsilon needed as this can be 0
-
-    double r_mid_a = 10000.0 * mid_p;
-    double g_mid_a = 1.0 / (r_mid_a + epsilon); // Epsilon needed
-
-    double r_vol_a = 1000000.0 * (1.0 - volume_t);
-    double r_vol_c = 1000000.0 * volume_t;
-    double g_vol_a = 1.0 / (r_vol_a);
-    double g_vol_c = 1.0 / (r_vol_c);
-
-    // --- Update Capacitor Conductances for Trapezoidal Integration ---
-    m_g_c56 = 2.0 * C56 * sampleRate;
-    m_g_c4 = 2.0 * C4 * sampleRate;
-    m_g_c3 = 2.0 * C3 * sampleRate;
-    m_g_c13b = 2.0 * C13B * sampleRate;
-
-    // --- Build the 7x7 MNA System Matrix 'A' ---
-    double A[7][7] = {0};
-
-    // KCL at N005
-    A[0][0] = g_treble_a + m_g_c56; A[0][1] = -g_treble_a;
-    // KCL at N007
-    A[1][0] = -g_treble_a; A[1][1] = g_treble_a + g_treble_c + g_r5a; A[1][3] = -g_treble_c; A[1][5] = -g_r5a;
-    // KCL at N015
-    A[2][2] = m_g_r5 + m_g_c4 + m_g_c3; A[2][3] = -m_g_c4; A[2][4] = -m_g_c3;
-    // KCL at N016
-    A[3][1] = -g_treble_c; A[3][2] = -m_g_c4; A[3][3] = g_treble_c + g_bass_a + m_g_c4; A[3][4] = -g_bass_a;
-    // KCL at N024
-    A[4][2] = -m_g_c3; A[4][3] = -g_bass_a; A[4][4] = g_bass_a + g_mid_a + m_g_c3;
-    // KCL at N008
-    A[5][1] = -g_r5a; A[5][5] = g_r5a + g_vol_a + m_g_c13b; A[5][6] = -g_vol_a - m_g_c13b;
-    // KCL at N020
-    A[6][5] = -g_vol_a - m_g_c13b; A[6][6] = g_vol_a + g_vol_c + m_g_c13b;
-
-    // Pre-calculate the inverse of the system matrix
-    invertMatrix(A, m_A_inv);
-}
-
-double ToneStack::process(double vin) {
-    // Build the 'b' vector for Ax = b
-    double b[7];
-    b[0] = m_s_c56 + vin * m_g_c56;
-    b[1] = 0.0;
-    b[2] = vin * m_g_r5 + m_s_c4 + m_s_c3;
-    b[3] = -m_s_c4;
-    b[4] = -m_s_c3;
-    b[5] = m_s_c13b;
-    b[6] = -m_s_c13b;
-
-    // Solve for the node voltages: v = A_inv * b
-    double v[7];
-    for (int i = 0; i < 7; ++i) {
-        v[i] = 0.0;
-        for (int j = 0; j < 7; ++j) {
-            v[i] += m_A_inv[i][j] * b[j];
-        }
-    }
-
-    // The output is the voltage at node N020 (index 6)
-    double output = v[6];
-
-    // Update capacitor state variables for the next time step
-    m_s_c56  = 2.0 * m_g_c56  * (v[0] - vin) - m_s_c56;
-    m_s_c4   = 2.0 * m_g_c4   * (v[2] - v[3]) - m_s_c4;
-    m_s_c3   = 2.0 * m_g_c3   * (v[2] - v[4]) - m_s_c3;
-    m_s_c13b = 2.0 * m_g_c13b * (v[5] - v[6]) - m_s_c13b;
-
-    return output;
 }
 
 // --- V1B ---
@@ -241,7 +120,7 @@ void V1BStage::prepare(double sampleRate) {
     make_hpf(outputCouplingFilter, sampleRate, 0.4);
     make_lpf(interStageLPF, sampleRate, 2900.0); // Initialize the LPF
     // This stage expects the post-tonestack signal, so its gain can be modest.
-    gain = 4.0;
+    gain = 25.0;
     reset();
 }
 
@@ -284,7 +163,7 @@ void V3BV4AStage::reset() {
 void V3BV4AStage::setGain(double g) {
     // Maps the [0,1] knob to a powerful gain factor [1x to 51x].
     // This is the core of the lead drive.
-    drive = 1.0 + 50.0 * (g * g);
+    drive = 1.0 + 100.0 * (g * g);
 }
 
 double V3BV4AStage::process(double in) {
@@ -310,7 +189,7 @@ void V2AStage::prepare(double sampleRate) {
     make_hpf(inputCouplingFilter, sampleRate, 72.0);
     make_hpf(cathodeBypassFilter, sampleRate, 10.3);
     make_hpf(outputCouplingFilter, sampleRate, 3.4);
-    gain = 1.5; // This stage is a recovery/driver stage.
+    gain = 10.0;
     reset();
 }
 
@@ -355,11 +234,6 @@ double Preamp::processSample(double in) {
     double sample = v1a.process(in);
 
     sample = toneStack.process(sample);
-
-    // 3. CRUCIAL: Apply Makeup Gain to compensate for tone stack insertion loss.
-    // Your numbers showed a ~20x drop. We'll compensate for that here.
-    // This brings the signal back to a healthy level for the next stages.
-    sample *= 20.0;
 
     double lead_path = v3b_v4a.process(sample);
 
