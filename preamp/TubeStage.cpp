@@ -3,33 +3,16 @@
 #include <numbers>
 #include <ostream>
 
-void make_lpf(IIRBiquad& filter, double sampleRate, double cutoff_freq);
-void make_hpf(IIRBiquad& filter, double sampleRate, double cutoff_freq);
-
 TubeStage::TubeStage() {
     reset();
 }
 
-void TubeStage::prepare(double sampleRate, double r_k, double r_l, double v_supply, double c_k) {
+void TubeStage::prepare(double r_k, double r_l, double v_supply) {
     R_k = r_k; R_L = r_l; V_supply = v_supply;
-    isBypassed = (c_k > 1e-12);
-
-    // Calculate the DC operating point first, as it's independent of the sample rate.
     calculateOperatingPoint();
-    reset(); // Reset filter states to zero.
-
-    // Configure the bypass filter *after* reset.
-    if (isBypassed) {
-        double cf = 1.0 / (2.0 * std::numbers::pi * R_k * c_k);
-        make_lpf(cathodeBypassFilter, sampleRate, cf);
-    }
 }
 
 void TubeStage::reset() {
-    inputFilter.reset();
-    outputFilter.reset();
-    interStageLPF.reset();
-    cathodeBypassFilter.reset();
 }
 
 void TubeStage::calculateOperatingPoint() {
@@ -75,17 +58,7 @@ void TubeStage::calculateOperatingPoint() {
     // 3. Calculate Thevenin equivalent parameters for the whole stage
     R_out = (r_p * R_L) / (r_p + R_L);
 
-    // 4. Calculate AC Gain, correctly modeling the bypassed cathode
-    double Zk_ac = 0.0; // Effective AC impedance of the cathode
-    if (isBypassed) {
-        // At AC, the capacitor has a very low impedance. We can approximate it as
-        // a small resistance in parallel with R_k, but for gain calculation,
-        // assuming it's near zero is standard for mid/high frequencies.
-        Zk_ac = 0.0; // Ideal bypass
-    } else {
-        Zk_ac = R_k; // Unbypassed
-    }
-    gain = (Mu * R_L) / (R_L + r_p + Zk_ac * (Mu + 1));
+    gain = (Mu * R_L) / (R_L + r_p + R_k * (Mu + 1.0));
 }
 
 double TubeStage::process(double V_in_ac, double R_load) {
