@@ -43,6 +43,8 @@ int main(int argc, char* argv[]) {
     myPreamp.mm_v3b_out.reset();
     myPreamp.mm_v4a_in.reset();
     myPreamp.mm_v4a_out.reset();
+    myPreamp.mm_v2b_in.reset();
+    myPreamp.mm_v2b_out.reset();
     myPreamp.mm_v2a_in.reset();
     myPreamp.mm_v2a_out.reset();
     myPreamp.mm_output.reset();
@@ -69,6 +71,8 @@ int main(int argc, char* argv[]) {
     myPreamp.mm_v3b_out.printMinMax("v3bO");
     myPreamp.mm_v4a_in.printMinMax("v4aI");
     myPreamp.mm_v4a_out.printMinMax("v4aO");
+    myPreamp.mm_v2b_in.printMinMax("v2bI");
+    myPreamp.mm_v2b_out.printMinMax("v2bO");
     myPreamp.mm_v2a_in.printMinMax("v2aI");
     myPreamp.mm_v2a_out.printMinMax("v2aO");
     myPreamp.mm_output.printMinMax(" out");

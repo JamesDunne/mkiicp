@@ -53,8 +53,10 @@ private:
     IIRBiquad v3b_to_v4a_lpf;
     IIRBiquad v4a_to_mixer_hpf;
     IIRBiquad mixer_output_lpf;
+    IIRBiquad v2b_to_v2a_hpf;
+    IIRBiquad v2b_to_v2a_lpf;
     IIRBiquad v2b_output_hpf;
 
 public:
-    MinMax mm_v1a, mm_toneStack, mm_v1b, mm_v3b_in, mm_v3b_out, mm_v4a_in, mm_v4a_out, mm_v2a_in, mm_v2a_out, mm_output;
+    MinMax mm_v1a, mm_toneStack, mm_v1b, mm_v3b_in, mm_v3b_out, mm_v4a_in, mm_v4a_out, mm_v2b_in, mm_v2b_out, mm_v2a_in, mm_v2a_out, mm_output;
 };
