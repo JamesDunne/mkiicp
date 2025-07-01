@@ -97,65 +97,119 @@ void ToneStack::prepare(double sampleRate) {
 }
 
 void ToneStack::reset() {
-    biquad.reset();
-    onePole.reset();
+    m_s_c56 = m_s_c4 = m_s_c3 = m_s_c13b = 0.0;
 }
 
 void ToneStack::setParams(double treble, double mid, double bass, double volume) {
-    treble_p = treble;
-    mid_p = mid;
-    bass_p = bass;
-    volume_p = volume;
+    // Clamp input parameters to the [0, 1] range
+    treble_p = std::clamp(treble, 0.0, 1.0);
+    bass_p = std::clamp(bass, 0.0, 1.0);
+    mid_p = std::clamp(mid, 0.0, 1.0);
+    volume_p = std::clamp(volume, 0.0, 1.0);
+    // analog tapers:
+    treble_p *= treble_p;
+    bass_p *= bass_p;
+    mid_p *= mid_p;
+    volume_p *= volume_p;
     calculateCoefficients();
 }
 
 void ToneStack::calculateCoefficients() {
-    // This is a highly simplified model of the Mesa tone stack's transfer function.
-    // Full symbolic derivation is complex. This captures the general behavior.
-    double R5 = 100e3;
-    double C4 = 0.1e-6;
-    double C3 = 0.047e-6;
+    // --- Stabilize Potentiometer Travel ---
+    // To prevent the MNA matrix from becoming singular, we must prevent any
+    // resistance from becoming a perfect zero. We map the user's [0,1] range
+    // to a slightly smaller internal range, e.g., [0.001, 0.999].
+    const double travel_min = 0.001;
+    const double travel_max = 1.0 - travel_min;
+    double treble_t = treble_p * travel_max + travel_min;
+    double volume_t = volume_p * travel_max + travel_min;
 
-    double treble_pot = 250e3 * treble_p * treble_p;
-    double bass_pot = 250e3 * bass_p * bass_p;
-    double mid_pot = 10e3 * mid_p * mid_p;
+    // --- Define Component Values and Epsilon for Stability ---
+    const double epsilon = 1e-12;
 
-    double v = pow(10, volume_p - 1.0);
+    const double C56 = 1.0e-9;
+    const double C4 = 1.0e-7;
+    const double C3 = 4.7e-8;
+    const double C13B = 1.8e-10;
 
-    double c0 = C3 * C4 * mid_pot * R5;
-    double c1 = (C3 + C4) * mid_pot + C4 * R5 + C3 * bass_pot;
-    double c2 = mid_pot + bass_pot;
-    double c3 = C3 * C4 * R5 * treble_pot;
-    double c4 = C4 * R5 + C3 * treble_pot;
+    // --- Calculate Component Conductances (G = 1/R) ---
+    m_g_r5 = 1.0 / 100000.0;
+    const double g_r5a = 1.0 / 100000.0;
 
-    double b0_a = c0;
-    double b1_a = c1 * 0.5;
-    double b2_a = c2 * 0.1;
-    double a0_a = c3 + 1e-7;
-    double a1_a = c4 * 0.5;
-    double a2_a = c2 * 0.2 + treble_pot * 0.1;
+    double r_treble_a = 250000.0 * (1.0 - treble_t);
+    double r_treble_c = 250000.0 * treble_t;
+    double g_treble_a = 1.0 / (r_treble_a); // No epsilon needed due to travel clamp
+    double g_treble_c = 1.0 / (r_treble_c);
 
-    double T = 1.0 / sampleRate;
-    double K = tan(PI * 1000 / sampleRate);
-    double K2 = K * K;
+    double r_bass_a = 250000.0 * bass_p;
+    double g_bass_a = 1.0 / (r_bass_a + epsilon); // Epsilon needed as this can be 0
 
-    double b0 = b0_a*K2 + b1_a*K + b2_a;
-    double b1 = 2 * (b2_a - b0_a*K2);
-    double b2 = b0_a*K2 - b1_a*K + b2_a;
-    double a0 = a0_a*K2 + a1_a*K + a2_a;
-    double a1 = 2 * (a2_a - a0_a*K2);
-    double a2 = a0_a*K2 - a1_a*K + a2_a;
+    double r_mid_a = 10000.0 * mid_p;
+    double g_mid_a = 1.0 / (r_mid_a + epsilon); // Epsilon needed
 
-    biquad.setCoefficients(b0, b1, b2, a0, a1, a2);
+    double r_vol_a = 1000000.0 * (1.0 - volume_t);
+    double r_vol_c = 1000000.0 * volume_t;
+    double g_vol_a = 1.0 / (r_vol_a);
+    double g_vol_c = 1.0 / (r_vol_c);
 
-    double R_treb_vol = treble_pot + 1e6 * v;
-    make_hpf(onePole, sampleRate, 1.0 / (2 * PI * C4 * R_treb_vol + 1e-9));
+    // --- Update Capacitor Conductances for Trapezoidal Integration ---
+    m_g_c56 = 2.0 * C56 * sampleRate;
+    m_g_c4 = 2.0 * C4 * sampleRate;
+    m_g_c3 = 2.0 * C3 * sampleRate;
+    m_g_c13b = 2.0 * C13B * sampleRate;
+
+    // --- Build the 7x7 MNA System Matrix 'A' ---
+    double A[7][7] = {0};
+
+    // KCL at N005
+    A[0][0] = g_treble_a + m_g_c56; A[0][1] = -g_treble_a;
+    // KCL at N007
+    A[1][0] = -g_treble_a; A[1][1] = g_treble_a + g_treble_c + g_r5a; A[1][3] = -g_treble_c; A[1][5] = -g_r5a;
+    // KCL at N015
+    A[2][2] = m_g_r5 + m_g_c4 + m_g_c3; A[2][3] = -m_g_c4; A[2][4] = -m_g_c3;
+    // KCL at N016
+    A[3][1] = -g_treble_c; A[3][2] = -m_g_c4; A[3][3] = g_treble_c + g_bass_a + m_g_c4; A[3][4] = -g_bass_a;
+    // KCL at N024
+    A[4][2] = -m_g_c3; A[4][3] = -g_bass_a; A[4][4] = g_bass_a + g_mid_a + m_g_c3;
+    // KCL at N008
+    A[5][1] = -g_r5a; A[5][5] = g_r5a + g_vol_a + m_g_c13b; A[5][6] = -g_vol_a - m_g_c13b;
+    // KCL at N020
+    A[6][5] = -g_vol_a - m_g_c13b; A[6][6] = g_vol_a + g_vol_c + m_g_c13b;
+
+    // Pre-calculate the inverse of the system matrix
+    invertMatrix(A, m_A_inv);
 }
 
-double ToneStack::process(double in) {
-    double out = biquad.process(in);
-    out = onePole.process(out);
-    return out * volume_p * volume_p;
+double ToneStack::process(double vin) {
+    // Build the 'b' vector for Ax = b
+    double b[7];
+    b[0] = m_s_c56 + vin * m_g_c56;
+    b[1] = 0.0;
+    b[2] = vin * m_g_r5 + m_s_c4 + m_s_c3;
+    b[3] = -m_s_c4;
+    b[4] = -m_s_c3;
+    b[5] = m_s_c13b;
+    b[6] = -m_s_c13b;
+
+    // Solve for the node voltages: v = A_inv * b
+    double v[7];
+    for (int i = 0; i < 7; ++i) {
+        v[i] = 0.0;
+        for (int j = 0; j < 7; ++j) {
+            v[i] += m_A_inv[i][j] * b[j];
+        }
+    }
+
+    // The output is the voltage at node N020 (index 6)
+    double output = v[6];
+
+    // Update capacitor state variables for the next time step
+    m_s_c56  = 2.0 * m_g_c56  * (v[0] - vin) - m_s_c56;
+    m_s_c4   = 2.0 * m_g_c4   * (v[2] - v[3]) - m_s_c4;
+    m_s_c3   = 2.0 * m_g_c3   * (v[2] - v[4]) - m_s_c3;
+    m_s_c13b = 2.0 * m_g_c13b * (v[5] - v[6]) - m_s_c13b;
+
+    return output;
 }
 
 // --- V1B ---
@@ -282,8 +336,5 @@ double Preamp::processSample(double in) {
 
     measureMinMax(sample);
 
-    // Final output trim. After a potential 50x gain, we need to
-    // attenuate significantly to get back to line level.
-    // This acts as a fixed "power amp input" level control.
-    return sample * 4.0;
+    return sample;
 }

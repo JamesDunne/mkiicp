@@ -30,11 +30,51 @@ public:
 private:
     void calculateCoefficients();
 
-    double sampleRate = 44100.0;
+    double sampleRate = 48000.0;
     double treble_p = 0.8, mid_p = 0.5, bass_p = 0.25, volume_p = 0.75;
 
-    IIRBiquad biquad;
-    IIRBiquad onePole;
+    // System matrix inverse
+    double m_A_inv[7][7];
+
+    // Component conductances needed in the process loop
+    double m_g_r5;
+    double m_g_c56, m_g_c4, m_g_c3, m_g_c13b;
+
+    // State variables for capacitors
+    double m_s_c56, m_s_c4, m_s_c3, m_s_c13b;
+
+    // A simple 7x7 matrix inverter using Gaussian elimination.
+    // For production code, a more robust numerical library (e.g., Eigen) is recommended.
+    static void invertMatrix(double a[7][7], double inv[7][7]) {
+        double temp[7][14];
+        for (int i = 0; i < 7; i++) {
+            for (int j = 0; j < 7; j++) {
+                temp[i][j] = a[i][j];
+                temp[i][j + 7] = (i == j) ? 1.0 : 0.0;
+            }
+        }
+
+        for (int i = 0; i < 7; i++) {
+            double pivot = temp[i][i];
+            for (int j = i; j < 14; j++) {
+                temp[i][j] /= pivot;
+            }
+            for (int k = 0; k < 7; k++) {
+                if (i != k) {
+                    double factor = temp[k][i];
+                    for (int j = i; j < 14; j++) {
+                        temp[k][j] -= factor * temp[i][j];
+                    }
+                }
+            }
+        }
+
+        for (int i = 0; i < 7; i++) {
+            for (int j = 0; j < 7; j++) {
+                inv[i][j] = temp[i][j + 7];
+            }
+        }
+    }
 };
 
 
