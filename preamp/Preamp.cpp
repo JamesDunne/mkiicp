@@ -47,6 +47,25 @@ inline double tubeSaturate12AX7(double x, double drive, double bias = -1.5) {
     return output * 0.4;
 }
 
+void make_lpf(IIRBiquad& filter, double sampleRate, double cutoff_freq) {
+    if (cutoff_freq >= sampleRate / 2.0) { // Avoid aliasing issues
+        filter.setCoefficients(1.0, 0.0, 0.0, 1.0, 0.0, 0.0); // Pass-through
+        return;
+    }
+    double wc = 2.0 * PI * cutoff_freq;
+    double K = tan(wc / (2.0 * sampleRate));
+    double norm = 1.0 / (K + 1.0);
+
+    filter.setCoefficients(
+        K * norm,     // b0
+        K * norm,     // b1
+        0.0,          // b2
+        1.0,          // a0 (normalized)
+        (K - 1.0) * norm, // a1
+        0.0           // a2
+    );
+}
+
 // --- Utility function to create a 1-pole High Pass Filter ---
 void make_hpf(IIRBiquad& filter, double sampleRate, double cutoff_freq) {
     if (cutoff_freq <= 0.0) { // Avoid issues with zero or negative frequencies
@@ -71,6 +90,7 @@ void make_hpf(IIRBiquad& filter, double sampleRate, double cutoff_freq) {
 void V1AStage::prepare(double sampleRate) {
     make_hpf(cathodeBypassFilter, sampleRate, 4.7);
     make_hpf(outputCouplingFilter, sampleRate, 31.0);
+    make_lpf(interStageLPF, sampleRate, 12000.0); // Gentle roll-off
     // Let's give V1A a more realistic "hot" gain before the tone stack.
     gain = 15.0;
     reset();
@@ -79,14 +99,17 @@ void V1AStage::prepare(double sampleRate) {
 void V1AStage::reset() {
     cathodeBypassFilter.reset();
     outputCouplingFilter.reset();
+    interStageLPF.reset();
 }
 
 double V1AStage::process(double in) {
     double out = cathodeBypassFilter.process(in);
     out = tubeSaturate12AX7(out, 1.0, -1.8);
     out = outputCouplingFilter.process(out);
-    // Output a hot signal, as it would be at the tube's plate.
-    return out * gain;
+    out *= gain;
+    // Apply final gentle LPF
+    out = interStageLPF.process(out);
+    return out;
 }
 
 // --- Tone Stack ---
@@ -216,6 +239,7 @@ double ToneStack::process(double vin) {
 void V1BStage::prepare(double sampleRate) {
     make_hpf(cathodeBypassFilter, sampleRate, 4.8);
     make_hpf(outputCouplingFilter, sampleRate, 0.4);
+    make_lpf(interStageLPF, sampleRate, 2900.0); // Initialize the LPF
     // This stage expects the post-tonestack signal, so its gain can be modest.
     gain = 4.0;
     reset();
@@ -224,13 +248,17 @@ void V1BStage::prepare(double sampleRate) {
 void V1BStage::reset() {
     cathodeBypassFilter.reset();
     outputCouplingFilter.reset();
+    interStageLPF.reset();
 }
 
 double V1BStage::process(double in) {
     double out = cathodeBypassFilter.process(in);
     out = tubeSaturate12AX7(out, 1.0, -1.8);
     out = outputCouplingFilter.process(out);
-    return out * gain;
+    out *= gain;
+    // Apply the LPF at the very end of the stage's output
+    out = interStageLPF.process(out);
+    return out;
 }
 
 // --- V3B and V4A (Lead Gain) ---
@@ -238,6 +266,7 @@ void V3BV4AStage::prepare(double sampleRate) {
     make_hpf(v3b_inputFilter, sampleRate, 5.0);
     make_hpf(v3b_cathodeBypass, sampleRate, 48.2);
     make_hpf(v3b_outputCoupling, sampleRate, 26.0);
+    make_lpf(fizzFilter, sampleRate, 3180.0);
     make_hpf(v4a_cathodeBypass, sampleRate, 220.0);
     make_hpf(v4a_outputCoupling, sampleRate, 15.0);
     reset();
@@ -247,6 +276,7 @@ void V3BV4AStage::reset() {
     v3b_inputFilter.reset();
     v3b_cathodeBypass.reset();
     v3b_outputCoupling.reset();
+    fizzFilter.reset();
     v4a_cathodeBypass.reset();
     v4a_outputCoupling.reset();
 }
@@ -262,6 +292,8 @@ double V3BV4AStage::process(double in) {
     double out = v3b_inputFilter.process(in);
     out = v3b_cathodeBypass.process(out);
     out *= drive; // Apply the main lead gain here.
+
+    out = fizzFilter.process(out);
 
     // V4A gets slammed by the high-level signal from V3B.
     // This is where the heavy clipping happens.
