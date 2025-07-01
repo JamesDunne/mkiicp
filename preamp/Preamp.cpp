@@ -71,7 +71,7 @@ double Preamp::processSample(double in) {
     double rhythm_path = v1b_to_rhythm_lpf.process(sample);
 
     // Lead Path
-    const double ATTENUATION_PRE_V3B = 0.2;
+    const double ATTENUATION_PRE_V3B = 0.5; //0.2;
     double lead_path = sample * ATTENUATION_PRE_V3B;
     lead_path = ts_to_v3b_hpf.process(lead_path);
     lead_path *= lead_drive;
@@ -85,10 +85,9 @@ double Preamp::processSample(double in) {
     mm_v4a_in.measureMinMax(lead_path);
     lead_path = v4a.process(lead_path);
     mm_v4a_out.measureMinMax(lead_path);
-    //lead_path = v4a_to_mixer_hpf.process(lead_path);
 
     // Mixdown & Final Stages
-    const double MIXER_ATTENUATION = 0.5;
+    const double MIXER_ATTENUATION = 1.0; //0.5;
     sample = (rhythm_path * 0.2 + lead_path * 0.8) * MIXER_ATTENUATION;
     sample = v4a_to_mixer_hpf.process(sample);
     sample = mixer_output_lpf.process(sample);
