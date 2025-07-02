@@ -39,7 +39,7 @@ public:
 
     double processSample(double in) {
         double out_s1 = stage1.process(in);
-        return out_s1;
+        // return out_s1;
 
         double out_s2 = stage2.process(out_s1);
         return out_s2;

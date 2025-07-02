@@ -125,8 +125,8 @@ public:
         x = current_x; // Store solution for next sample and history update
         
         // Update capacitor history using the new voltages
-        updateCapacitorHistory(x[V_N027], 0,         cap_hist[0]); // C13
-        updateCapacitorHistory(x[V_N001], x[V_N009], cap_hist[1]); // C7
+        updateCapacitorState(x[V_N027], 0,         C13, cap_hist[0]); // C13
+        updateCapacitorState(x[V_N001], x[V_N009], C7,  cap_hist[1]); // C7
 
         // The output of this stage is the voltage at node N001
         return x[V_N001];

@@ -55,28 +55,29 @@ protected:
         }
     }
 
-    void stampCapacitor(int n1, int n2, double C, double& v_hist) {
+    // Stamps the capacitor's conductance and its history-dependent current source.
+    void stampCapacitor(int n1, int n2, double C, const double& z_state) {
         double Gc = invT_2 * C;
-        double Ic = Gc * v_hist;
 
-        if (n1 != -1) {
-            A[n1][n1] += Gc;
-            b[n1] += Ic;
-        }
-        if (n2 != -1) {
-            A[n2][n2] += Gc;
-            b[n2] -= Ic;
-        }
+        // Stamp the conductance Gc = 2C/T
+        if (n1 != -1) A[n1][n1] += Gc;
+        if (n2 != -1) A[n2][n2] += Gc;
         if (n1 != -1 && n2 != -1) {
             A[n1][n2] -= Gc;
             A[n2][n1] -= Gc;
         }
+
+        // Stamp the history current source I_eq = z_state
+        // Note the direction: current flows from n2 to n1
+        if (n1 != -1) b[n1] += z_state;
+        if (n2 != -1) b[n2] -= z_state;
     }
 
-    // Note: This function operates on voltages, so ground is simply 0.0. No change needed.
-    void updateCapacitorHistory(double v_n1, double v_n2, double& v_hist) {
-        double vc = v_n1 - v_n2;
-        v_hist = invT_2 * vc - v_hist;
+    // Updates the capacitor's history state 'z' for the next time step.
+    void updateCapacitorState(double v_n1, double v_n2, double C, double& z_state) {
+        double Gc = invT_2 * C;
+        double vc = v_n1 - v_n2; // Current voltage across the capacitor
+        z_state = 2.0 * Gc * vc - z_state;
     }
 
     void stampVoltageSource(int n_p, int n_n, int v_idx, double voltage) {
