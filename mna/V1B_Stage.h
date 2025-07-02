@@ -11,9 +11,11 @@
 // Output: Voltage at node N001.
 //
 // SPICE components included: XV1B, R8, R7, C13, C7, R9.
-// The system has 4 nodes and 1 voltage source (the input signal).
+// The system has 4 unknown nodes and 1 voltage source for the input.
 class V1B_Stage : public MNASolver<4, 1> {
 private:
+    static constexpr int GND = -1;
+
     // A single enum for all unknowns in the solution vector 'x'.
     // The first 4 are node voltages (0-based indices).
     // The last 1 is the current through the input voltage source.
@@ -23,46 +25,45 @@ private:
         V_N009,     // Plate node
         V_N020,     // Grid / Input node
         V_N027,     // Cathode node
-        // V-Source Currents
-        I_VIN // This will be at index 4 (NumNodes)
+        // I_VIN at index 4 (NumNodes)
     };
 
     // Component values
     double R7, R8, R9;
     double C7, C13;
-    
-    // History for capacitors
-    std::vector<double> cap_hist;
+
+    // State variables for the capacitors
+    std::vector<double> cap_z_state;
 
     // Power supply voltage connected to the plate load resistor
     const double VE = 405.0;
 
     void stampComponents(double inputVoltage) {
         resetMatrices();
-        
+
         // --- Input Source ---
         // The input signal is the voltage at node N020.
-        stampVoltageSource(V_N020 + 1, 0, 0, inputVoltage);
+        stampVoltageSource(V_N020, GND, 0, inputVoltage);
 
         // --- Static Components ---
         // Plate load resistor (R8) connected to power supply VE
-        stampResistor(V_N009 + 1, 0, R8);
-        b[V_N009] += VE / R8; // Model VE as a current source contribution
+        stampResistor(V_N009, GND, R8);
+        b[V_N009] += VE / R8;
 
         // Cathode resistor (R7)
-        stampResistor(V_N027 + 1, 0, R7);
-        
+        stampResistor(V_N027, GND, R7);
+
         // Load resistor / next stage's grid-leak (R9)
-        stampResistor(V_N001 + 1, 0, R9);
+        stampResistor(V_N001, GND, R9);
 
         // --- Capacitors ---
         // Cathode bypass capacitor (C13)
-        stampCapacitor(V_N027 + 1, 0, C13, cap_hist[0]);
-        
+        stampCapacitor(V_N027, GND, C13, cap_z_state[0]);
+
         // Output coupling capacitor (C7)
-        stampCapacitor(V_N001 + 1, V_N009 + 1, C7, cap_hist[1]);
+        stampCapacitor(V_N001, V_N009, C7, cap_z_state[1]);
     }
-    
+
     void stampNonLinear(const std::array<double, NumUnknowns>& current_x) {
         // XV1B: Plate=N009, Grid=N020, Cathode=N027
         double v_p = current_x[V_N009];
@@ -70,13 +71,12 @@ private:
         double v_c = current_x[V_N027];
 
         Triode::State ts = Triode::calculate(v_p - v_c, v_g - v_c);
-        
+
         // --- Plate Current ---
         double i_p_lin = ts.ip - ts.g_p * (v_p - v_c) - ts.g_g * (v_g - v_c);
-        stampCurrentSource(V_N009 + 1, V_N027 + 1, i_p_lin);
-        stampConductance(V_N009 + 1, V_N027 + 1, ts.g_p);
-        
-        // Transconductance (Vg influence on Ip)
+        stampCurrentSource(V_N009, V_N027, i_p_lin);
+        stampConductance(V_N009, V_N027, ts.g_p);
+
         A[V_N009][V_N020] += ts.g_g;
         A[V_N009][V_N027] -= ts.g_g;
         A[V_N027][V_N020] -= ts.g_g;
@@ -84,12 +84,12 @@ private:
 
         // --- Grid Current ---
         double i_g_lin = ts.ig - ts.g_ig * (v_g - v_c);
-        stampCurrentSource(V_N020 + 1, V_N027 + 1, i_g_lin);
-        stampConductance(V_N020 + 1, V_N027 + 1, ts.g_ig);
+        stampCurrentSource(V_N020, V_N027, i_g_lin);
+        stampConductance(V_N020, V_N027, ts.g_ig);
     }
 
 public:
-    V1B_Stage() : cap_hist(2, 0.0) {
+    V1B_Stage() : cap_z_state(2, 0.0) {
         // Set fixed component values from SPICE netlist
         R7 = 1.5e3;
         R8 = 100e3;
@@ -99,34 +99,36 @@ public:
     }
 
     // No user-adjustable parameters in this stage
-    
+
     double process(double in) {
         const int MAX_ITER = 15;
         const double CONVERGENCE_THRESH = 1e-6;
-        
-        std::array<double, NumUnknowns> current_x = x; // Start iteration with last solution
+
+        std::array<double, NumUnknowns> current_x = x;
 
         for (int i = 0; i < MAX_ITER; ++i) {
             stampComponents(in);
             stampNonLinear(current_x);
-            
-            if (!lu_decompose()) break; // Matrix is singular, abort
-            
-            std::array<double, NumUnknowns> delta_x;
-            lu_solve(delta_x);
-            
+
+            if (!lu_decompose()) { return 0.0; }
+
+            std::array<double, NumUnknowns> next_x;
+            lu_solve(next_x);
+
             double norm = 0.0;
             for(size_t j = 0; j < NumUnknowns; ++j) {
-                current_x[j] += delta_x[j];
-                norm += delta_x[j] * delta_x[j];
+                double diff = next_x[j] - current_x[j];
+                norm += diff * diff;
             }
-            if (sqrt(norm) < CONVERGENCE_THRESH) break; // Converged
+            current_x = next_x;
+
+            if (sqrt(norm) < CONVERGENCE_THRESH) { break; }
         }
-        x = current_x; // Store solution for next sample and history update
-        
-        // Update capacitor history using the new voltages
-        updateCapacitorState(x[V_N027], 0,         C13, cap_hist[0]); // C13
-        updateCapacitorState(x[V_N001], x[V_N009], C7,  cap_hist[1]); // C7
+        x = current_x;
+
+        // Update capacitor states for the next time step
+        updateCapacitorState(x[V_N027], 0, C13, cap_z_state[0]);
+        updateCapacitorState(x[V_N001], x[V_N009], C7, cap_z_state[1]);
 
         // The output of this stage is the voltage at node N001
         return x[V_N001];

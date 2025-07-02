@@ -8,4 +8,8 @@ add_executable(mna main.cpp
         MNASolver.h
         V1A_ToneStack.h
         MarkIICPreamp.h
-        V1B_Stage.h)
+        V1B_Stage.h
+        Coupling1.h
+        V3B_Stage.h
+        LeadPathCoupling.h
+        LeadPathCoupling2.h)
