@@ -92,32 +92,32 @@ struct TubeStageV3B
 {
     // --- Clamping Voltages ---
     static constexpr double CLAMP_HIGH_V = 410.0;
-    static constexpr double CLAMP_LOW_V  = 22.570510;
+    static constexpr double CLAMP_LOW_V  = 22.586910;
 
     // --- Optimized Segment Boundaries ---
     static constexpr double BOUNDARY_0 = -9.887168;
-    static constexpr double BOUNDARY_1 = -5.939045;
-    static constexpr double BOUNDARY_2 = -1.566184;
-    static constexpr double BOUNDARY_3 = 3.612823;
-    static constexpr double BOUNDARY_4 = 12.800175;
-    static constexpr double BOUNDARY_5 = 25.222780;
+    static constexpr double BOUNDARY_1 = -5.938331;
+    static constexpr double BOUNDARY_2 = -1.510916;
+    static constexpr double BOUNDARY_3 =  3.632282;
+    static constexpr double BOUNDARY_4 = 12.832285;
+    static constexpr double BOUNDARY_5 = 25.214110;
 
     // --- Polynomial Coefficients ---
 
-    // Segment 1: Vg in [-9.887168, -5.939045) -> Quadratic
-    static constexpr std::array<double, 3> SEG1_COEFFS = { -5.31602679e-02, -9.66479730e-01, 4.05607294e+02 };
+    // Segment 1: Quadratic
+    static constexpr std::array<double, 3> SEG1_COEFFS = { -5.33178360e-02, -9.69462617e-01, 4.05593203e+02 };
 
-    // Segment 2: Vg in [-5.939045, -1.566184) -> Cubic
-    static constexpr std::array<double, 4> SEG2_COEFFS = { 4.11523852e-01, 1.57922933e+00, -2.51229307e+01, 2.90770443e+02 };
+    // Segment 2: Cubic
+    static constexpr std::array<double, 4> SEG2_COEFFS = { 4.00895154e-01, 1.46260084e+00, -2.53766431e+01, 2.91148912e+02 };
 
-    // Segment 3: Vg in [-1.566184, 3.612823) -> Quadratic
-    static constexpr std::array<double, 3> SEG3_COEFFS = { -3.54365215e-01, -2.81513399e+01, 2.89189405e+02 };
+    // Segment 3: Quadratic
+    static constexpr std::array<double, 3> SEG3_COEFFS = { -3.54557450e-01, -2.81222190e+01, 2.89766132e+02 };
 
-    // Segment 4: Vg in [3.612823, 12.800175) -> Quadratic
-    static constexpr std::array<double, 3> SEG4_COEFFS = { 1.56190133e+00, -4.19976045e+01, 3.14201458e+02 };
+    // Segment 4: Quadratic
+    static constexpr std::array<double, 3> SEG4_COEFFS = { 1.55934540e+00, -4.20258901e+01, 3.15017162e+02 };
 
-    // Segment 5: Vg in [12.800175, 25.222780] -> Quadratic
-    static constexpr std::array<double, 3> SEG5_COEFFS = { 9.74324848e-02, -4.50669058e+00, 7.42563358e+01 };
+    // Segment 5: Quadratic
+    static constexpr std::array<double, 3> SEG5_COEFFS = { 9.73314013e-02, -4.50392956e+00, 7.42709162e+01 };
 };
 
 /**

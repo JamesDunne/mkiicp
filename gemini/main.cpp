@@ -463,7 +463,7 @@ int tonestack_test_main() {
 
 int stage1_main(int argc, char *argv[]) {
     PassiveToneStack tone;
-    tone.setParameters(48000.0, 0.67, 0.15, 0.25, 0.86);
+    tone.setParameters(48000.0, 0.8, 0.25, 0.5, 0.75);
 
     const std::string input_filename = argv[1];
     const std::string output_filename = argv[2];
@@ -476,6 +476,7 @@ int stage1_main(int argc, char *argv[]) {
         [&](double sample) -> double {
             // double vout = (StageV1A::processSample(sample) - 2.08157285e+02) / 45.0;
             double vout = StageV1A::processSample(sample);
+            double ac_out = vout;
             vout -= StageV1A::Params::SEG3_COEFFS[2]; // remove DC offset
             vout = tone.processSample(vout); // apply tone stack
             vout = StageV1B::processSample(vout);
@@ -483,10 +484,9 @@ int stage1_main(int argc, char *argv[]) {
             vout /= 47.0;
             vout = StageV3B::processSample(vout);
             vout = (vout - StageV3B::Params::SEG3_COEFFS[2]) / 200.0; // remove DC offset; scale to unity range
-            double ac_out = vout;
             if (ac_out > max) { max = ac_out; }
             if (ac_out < min) { min = ac_out; }
-            return ac_out;
+            return vout;
         }
     );
     std::cout << min << " " << max << std::endl;
