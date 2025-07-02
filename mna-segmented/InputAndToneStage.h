@@ -2,20 +2,19 @@
 #include "MNASolver.h"
 
 // The number of unknown nodes for this combined circuit segment.
-constexpr int V1A_TONESTACK_NODES = 10;
+constexpr int V1A_TONESTACK_NODES = 9;
 
 // Namespace to provide clear, readable names for the node indices within the implementation.
 namespace V1A_Nodes {
     constexpr int N004 = 0; // Plate of V1A, input to the tone stack
     constexpr int N033 = 1; // Cathode of V1A
-    constexpr int E1_V1A_UNUSED = 2; // Index reserved but unused due to the simplified NR model
-    constexpr int N020 = 3; // Output of the segment (wiper of vol1)
-    constexpr int N015 = 4; // Tone stack internal node
-    constexpr int N005 = 5; // Tone stack internal node
-    constexpr int N007 = 6; // Tone stack internal node (treble pot wiper)
-    constexpr int N008 = 7; // Tone stack internal node (volume pot input)
-    constexpr int N016 = 8; // Tone stack internal node (bass/treble junction)
-    constexpr int N028 = 9; // Tone stack internal node (bass/mid junction)
+    constexpr int N020 = 2; // Output of the segment (wiper of vol1)
+    constexpr int N015 = 3; // Tone stack internal node
+    constexpr int N005 = 4; // Tone stack internal node
+    constexpr int N007 = 5; // Tone stack internal node (treble pot wiper)
+    constexpr int N008 = 6; // Tone stack internal node (volume pot input)
+    constexpr int N016 = 7; // Tone stack internal node (bass/treble junction)
+    constexpr int N028 = 8; // Tone stack internal node (bass/mid junction)
 }
 
 /**
