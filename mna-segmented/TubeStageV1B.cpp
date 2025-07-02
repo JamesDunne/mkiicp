@@ -1,43 +1,44 @@
 #include "TubeStageV1B.h"
-#include "TubeParams.h"
-#include <cmath>
+#include "TubeModel.h" // The shared helper for non-linear tube calculations
 
-namespace V1B_Nodes { constexpr int Plate = 0, Cathode = 1; }
+// Use the namespace for node indices for improved readability.
+using namespace V1B_Nodes;
 
-TubeStageV1B::TubeStageV1B(double sampleRate) : MNASolver<2>(sampleRate, true) {
+TubeStageV1B::TubeStageV1B(double sampleRate)
+    : MNASolver<2>(sampleRate, true) // true = this is a non-linear circuit
+{
+    // Flag for the initial calculation of the system matrices.
     flagForRecalculation();
 }
 
 void TubeStageV1B::stampLinear(Matrix<2>& G, Matrix<2>& C) {
-    using namespace V1B_Nodes;
-    const double R8 = 100e3;  // Plate load
-    const double R7 = 1.5e3;   // Cathode resistor
-    const double C13 = 22e-6; // Cathode bypass
+    // Helper lambda for converting resistance to conductance.
+    auto g = [](double r) { return (r > 1e-12) ? 1.0 / r : 1e12; };
 
-    G[Plate][Plate] += 1.0 / R8;
-    G[Cathode][Cathode] += 1.0 / R7;
+    // --- Define Component Values for the V1B Stage ---
+    const double R8 = 100e3;  // Plate load resistor to B+ (AC ground)
+    const double R7 = 1.5e3;   // Cathode resistor to ground
+    const double C13 = 22e-6; // Cathode bypass capacitor to ground
+
+    // Stamp the components into the G (conductance) and C (capacitance) matrices.
+
+    // R8 is connected from the Plate (node 0) to AC ground.
+    G[Plate][Plate] += g(R8);
+
+    // R7 is connected from the Cathode (node 1) to ground.
+    G[Cathode][Cathode] += g(R7);
+
+    // C13 is connected from the Cathode (node 1) to ground.
     C[Cathode][Cathode] += C13;
 }
 
 void TubeStageV1B::stampNonlinear(Matrix<2>& J, Vector<2>& b, const Vector<2>& x, const std::vector<double>& u) {
-    using namespace V1B_Nodes;
-    double v_p = x[Plate], v_c = x[Cathode], v_g = u[0];
-    
-    // Koren tube model evaluation (this logic will be repeated in all tube stages)
-    double v_gp = v_g - v_p;
-    double v_gc = v_g - v_c;
-    double e1_arg = Tube::KP * (1.0/Tube::MU + v_gc / sqrt(Tube::KVB + v_gp*v_gp));
-    double e1 = log1p(exp(e1_arg)) / Tube::KP;
-    double g1 = pow(e1, Tube::EX) / Tube::KG1;
-    
-    // Partial derivatives (simplified for brevity, a full implementation is needed)
-    double dG1_dVp = 0.0, dG1_dVc = 0.0, dG1_dVg = 0.0;
-    // ... calculate actual derivatives here ...
+    // This function adds the contribution of the non-linear V1B tube.
+    // The grid voltage is the external input to this block.
+    double v_grid = u[0];
 
-    // Stamp current source and its derivatives
-    b[Plate] -= g1; b[Cathode] += g1;
-    b[Plate] -= dG1_dVg * v_g; b[Cathode] += dG1_dVg * v_g;
-    
-    J[Plate][Plate]   += -dG1_dVp; J[Plate][Cathode]   += -dG1_dVc;
-    J[Cathode][Plate] += dG1_dVp;  J[Cathode][Cathode] += dG1_dVc;
+    // Delegate the complex calculations to the TubeModel helper function.
+    // We provide the Jacobian (J), RHS vector (b), previous state (x),
+    // current grid voltage (v_grid), and the node indices for this stage's plate and cathode.
+    TubeModel::stamp(J, b, x, v_grid, Plate, Cathode);
 }
