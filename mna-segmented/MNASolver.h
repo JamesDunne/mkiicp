@@ -102,6 +102,11 @@ protected:
     // Tells the solver which node index is the output.
     virtual int getOutputNodeIndex() const = 0;
 
+    // State
+    Vector<N> x_prev; // Previous node voltages x[n-1]
+    std::vector<double> prev_inputs;
+    double sampleRate;
+    double g_s; // 2.0 * sampleRate
 
 private:
     void recalculateMatrices() {
@@ -127,14 +132,8 @@ private:
         }
     }
 
-    double sampleRate;
-    double g_s; // 2.0 * sampleRate
     bool isNonLinear;
     bool needsRecalculation;
-
-    // State
-    Vector<N> x_prev; // Previous node voltages x[n-1]
-    std::vector<double> prev_inputs;
 
     // System Matrices
     Matrix<N> G, C; // Linear part

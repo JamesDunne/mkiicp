@@ -1,6 +1,11 @@
 #pragma once
 #include "MNASolver.h"
 
+// Node mapping for clarity
+namespace LCF_Nodes {
+    constexpr int N018 = 0, N030 = 1, PlateV4A = 2, CathodeV4A = 3, N026 = 4;
+}
+
 class LeadChannelFinisher : public MNASolver<5> {
 public:
     LeadChannelFinisher(double sampleRate);
