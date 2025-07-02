@@ -1,12 +1,10 @@
 #pragma once
-#include <algorithm>
 #include <cmath>
+#include <algorithm> // For std::max
 
 // Model parameters for a 12AX7 triode based on the SPICE model
 // .SUBCKT 12AX7 1 2 3; A G C;
 // X1 1 2 3 TriodeK MU=96.20 EX=1.437 KG1=613.4 KP=740.3 KVB=1672. RGI=2000
-// Note: This implementation simplifies grid current for stability, using a simple diode model.
-
 class Triode {
 private:
     // Koren Tube Model Parameters
@@ -32,49 +30,59 @@ public:
 
     // Calculates the state of the triode given plate-cathode and grid-cathode voltages
     static State calculate(double v_p, double v_g) {
-        State s = {0.0, 0.0, 1e-9, 1e-9, 1e-9}; // Initialize with tiny conductances for stability
+        State s = {0.0, 0.0, 1e-12, 1e-12, 1e-12}; // Initialize with tiny conductances for stability
 
-        // Plate Current Calculation (Koren Model)
-        double e1_num = v_p / KP;
-        double e1_den = 1.0 / MU + v_g / sqrt(KVB + v_p * v_p);
+        // --- Plate Current Calculation (Koren Model) ---
+        // To avoid floating point issues, ensure v_p is slightly positive.
+        // The sqrt(KVB + v_p*v_p) term handles negative v_p gracefully, but v_p=0 can be problematic.
+        double v_p_safe = std::max(v_p, 1e-6);
 
-        double e1 = 0.0;
-        if (e1_den > -0.999) { // Avoid log of negative/zero
-             e1 = e1_num * log(1.0 + exp(KP * e1_den));
+        double e1_den_sqrt = sqrt(KVB + v_p_safe * v_p_safe);
+        double e1_den = v_g / e1_den_sqrt;
+
+        // The 'soft-rectifier' log(1 + exp(x)) function
+        double e1_exp_arg = KP * (1.0 / MU + e1_den);
+        double e1 = 0;
+        if (e1_exp_arg < 100) { // Prevent overflow in exp()
+            e1 = (v_p_safe / KP) * log(1.0 + exp(e1_exp_arg));
         } else {
-             e1 = e1_num * KP * e1_den; // Linear approximation for large negative args
+            e1 = (v_p_safe / KP) * e1_exp_arg; // Linear approximation for large x
         }
 
-        if (e1 < 0) e1 = 0; // Current doesn't flow backward
+        // The PWRS function from SPICE is 0 for negative base.
+        if (e1 < 0) e1 = 0;
+        s.ip = pow(e1, EX) / KG1;
 
-        s.ip = (2.0 * pow(e1, EX)) / (2.0 * KG1); // Simplified from 0.5*(pwr+pwrs) since e1>=0
+        // --- Derivatives for Newton-Raphson (Corrected) ---
+        if (s.ip > 1e-12) {
+            double exp_val = exp(e1_exp_arg);
+            double log_val = log(1.0 + exp_val);
+            double common_term1 = exp_val / (1.0 + exp_val);
 
-        // Derivatives for Newton-Raphson
-        if (s.ip > 1e-12) { // Only calculate if there is current
-            double exp_val = exp(KP * e1_den);
-            double common_term = EX * pow(e1, EX - 1.0) / KG1;
-            double d_e1_dvp = (e1 / v_p) - (v_p * v_g * KP * exp_val) / ( (1.0+exp_val) * sqrt(pow(KVB + v_p*v_p, 3)) );
-            double d_e1_dvg = (v_p * KP * exp_val) / (KP * (1.0 + exp_val) * sqrt(KVB + v_p*v_p));
+            // Derivative of e1 with respect to v_p
+            double de1_dvp = (1.0 / KP) * log_val - (v_p_safe * v_g * common_term1) / pow(e1_den_sqrt, 3);
 
-            s.g_p = common_term * d_e1_dvp;
-            s.g_g = common_term * d_e1_dvg;
+            // Derivative of e1 with respect to v_g
+            double de1_dvg = (v_p_safe / e1_den_sqrt) * common_term1;
+
+            // Final derivatives of plate current Ip
+            double common_term2 = EX * pow(e1, EX - 1.0) / KG1;
+            s.g_p = common_term2 * de1_dvp;
+            s.g_g = common_term2 * de1_dvg;
         }
 
-        // Grid Current Calculation (simplified diode model + RGI)
+        // --- Grid Current Calculation ---
         if (v_g > 0) {
-            double v_diode = v_g; // Simplified: assume voltage is directly on diode
-            s.ig = IS * (exp(v_diode / VT) - 1.0);
-            s.g_ig = IS / VT * exp(v_diode / VT);
+            s.ig = IS * (exp(v_g / VT) - 1.0);
+            s.g_ig = (IS / VT) * exp(v_g / VT);
         }
-
-        // Add RGI contribution
         s.ig += v_g / RGI;
         s.g_ig += 1.0 / RGI;
 
         // Clamp conductances to prevent instability
-        s.g_p = std::max(1e-9, s.g_p);
-        s.g_g = std::max(1e-9, s.g_g);
-        s.g_ig = std::max(1e-9, s.g_ig);
+        s.g_p = std::max(1e-12, s.g_p);
+        s.g_g = std::max(1e-12, s.g_g);
+        s.g_ig = std::max(1e-12, s.g_ig);
 
         return s;
     }
