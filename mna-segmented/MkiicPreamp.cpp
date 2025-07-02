@@ -13,7 +13,7 @@
 
 
 MkiicPreamp::MkiicPreamp(double sampleRate) 
-    : finalGain(1.0 / 1400.0) // From E1 element in SPICE
+    : finalGain(1.0 / 1.0) // From E1 element in SPICE
 {
     // Instantiate all the circuit blocks
     block_inputAndTone = std::make_unique<InputAndToneStage>(sampleRate);
@@ -69,6 +69,7 @@ double MkiicPreamp::process(double inputSample) {
 
     // 1. Input Stage (V1A) and Tone Stack
     double v_N020 = block_inputAndTone->process(inputSample);
+    return v_N020;
 
     // 2. V1B Recovery Stage
     double v_N009 = block_v1b->process(v_N020);

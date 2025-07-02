@@ -4,9 +4,6 @@
 
 #include "WaveFile.h"
 
-// Dummy audio buffer for demonstration
-std::vector<float> audio_buffer(48000, 0.0f);
-
 int main(int argc, char** argv) {
     const double sampleRate = 48000.0;
 
@@ -20,6 +17,9 @@ int main(int argc, char** argv) {
     std::cout << "MKIIC+ Preamp simulation initialized." << std::endl;
 
 #if 0
+    // Dummy audio buffer for demonstration
+    std::vector<float> audio_buffer(48000, 0.0f);
+
     // 2. Set parameters for a high-gain lead sound
     std::cout << "Setting parameters for a lead tone..." << std::endl;
     preamp.setToneParams(0.7, 0.2, 0.6, 0.8); // Treble, Mid, Bass, Vol1

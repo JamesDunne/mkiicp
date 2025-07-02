@@ -56,6 +56,7 @@ public:
             } catch(const std::runtime_error& e) {
                  // Solver failed, hold previous state to prevent artifacts
                  // In a real product, you might log this error.
+                std::cerr << e.what() << std::endl;
             }
 
         } else {
