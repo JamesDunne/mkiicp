@@ -16,7 +16,7 @@ private:
     V1B_Stage v1b;
     Coupling1 v1bCoupling;
     V3B_and_Coupling v3b;
-    V4A_and_Coupling v4a;
+    V4A_and_MixerLoad v4a;
     MixerAndV2B mixerv2b;
     // V2A_OutputStage stage9;
 
@@ -55,7 +55,7 @@ public:
         // return out_s4;
 
         double out_s5 = v4a.process(out_s4);
-        // return out_s5;
+        return out_s5;
 
         double out_s8 = mixerv2b.process(out_s3, out_s5); // Mixer stage
         return out_s8;
