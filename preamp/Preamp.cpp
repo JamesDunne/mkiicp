@@ -64,6 +64,9 @@ double Preamp::processSample(double in) {
     sample = toneStack.process(sample);
     mm_toneStack.measureMinMax(sample);
 
+#if 1
+    return sample;
+#else
     sample = v1b.process(sample);
     mm_v1b.measureMinMax(sample);
 
@@ -120,4 +123,5 @@ double Preamp::processSample(double in) {
     mm_output.measureMinMax(sample);
 
     return sample / 120.0;
+#endif
 }

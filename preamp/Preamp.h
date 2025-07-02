@@ -3,7 +3,13 @@
 #include <iostream>
 #include <string>
 
+#include "IIRBiquad.h"
+#ifdef USE_TONESTACK_MNA
+#include "ToneStackMNA.h"
+using ToneStack = ToneStackFilter;
+#else
 #include "ToneStack.h"
+#endif
 #include "TubeStage.h"
 
 class MinMax {

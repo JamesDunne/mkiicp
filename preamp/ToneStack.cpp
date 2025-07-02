@@ -1,3 +1,7 @@
+
+#ifndef USE_TONESTACK_MNA
+
+#include <ranges>
 #include "Preamp.h"
 
 // --- Tone Stack (Final, Stable Biquad Model) ---
@@ -54,3 +58,5 @@ double ToneStack::process(double in) {
     double eq_signal = filter.process(ac_signal);
     return eq_signal * vol_gain;
 }
+
+#endif

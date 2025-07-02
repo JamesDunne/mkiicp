@@ -48,12 +48,15 @@ int main(int argc, char* argv[]) {
     myPreamp.mm_v2a_in.reset();
     myPreamp.mm_v2a_out.reset();
     myPreamp.mm_output.reset();
-#if 0
+
+#if 1
     for (int i = 0; i < 1024; i++) {
-        double x = (i - 512) / 512.0;
+        double x = (i - 512) / 512.0 * 24.0;
         double y = myPreamp.processSample(x);
-        std::cout << x << "\t" << y << std::endl;
+        std::cout << std::fixed;
+        std::cout << std::setw(12) << x << "\t" << std::setw(12) << y << std::endl;
     }
+    return 0;
 #else
 
     processWavFile(
