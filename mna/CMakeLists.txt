@@ -11,6 +11,6 @@ add_executable(mna main.cpp
         V1B_Stage.h
         Coupling1.h
         V3B_Stage.h
-        LeadPathCoupling2.h
         V4A_Stage.h
-        WaveFile.h)
+        WaveFile.h
+        MixerAndV2B.h)
