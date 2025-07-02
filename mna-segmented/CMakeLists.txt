@@ -27,4 +27,7 @@ add_executable(mna_segmented main.cpp
         FinalStageAndMaster.cpp
         FinalStageAndMaster.h
         MkiicPreamp.cpp
-        MkiicPreamp.h)
+        MkiicPreamp.h
+        WaveFile.cpp
+        WaveFile.h
+        WaveFile.h)
