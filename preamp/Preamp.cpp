@@ -38,7 +38,7 @@ void Preamp::prepare(double sampleRate) {
     v2a.prepare(sampleRate, 1.0e3, 120e3, 410.0, 15.47e-6);
 
     // --- Prepare Tone Stack (and prime its DC blocker) ---
-    toneStack.prepare(sampleRate, v1a.getVpDC());
+    toneStack.setSampleRate(sampleRate); //, v1a.getVpDC());
 
     // --- Prepare ALL Inter-stage Filters ---
     make_lpf(v1a_output_lpf, sampleRate, 12000.0);

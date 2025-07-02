@@ -13,6 +13,6 @@ add_executable(preamp main.cpp
         IIRFilter.h
         TubeStage.cpp
         TubeStage.h
-        ToneStackMNA.h)
+)
 
 target_compile_definitions(preamp PUBLIC USE_TONESTACK_MNA)
