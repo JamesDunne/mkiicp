@@ -6,6 +6,14 @@
 #include <cstddef>
 #include <numeric>
 
+#if defined(__GNUC__) || defined(__clang__)
+#define RESTRICT __restrict__
+#elif defined(_MSC_VER)
+#define RESTRICT __declspec(restrict)
+#else
+#define RESTRICT
+#endif
+
 template <size_t Ns, size_t Vs>
 class MNASolver {
 public:
@@ -174,12 +182,13 @@ protected:
         if (n2 != -1) b[n2] += i;
     }
 
-    // --- Solver (No changes needed below this line) ---
+    // --- NEW: Optimized LU Decomposition for Vectorization ---
     bool lu_decompose() {
         A_lu = A;
         for (size_t i = 0; i < NumUnknowns; ++i) pivot[i] = i;
 
         for (size_t i = 0; i < NumUnknowns; ++i) {
+            // Find pivot (unchanged)
             double max_val = 0.0;
             size_t max_row = i;
             for (size_t k = i; k < NumUnknowns; ++k) {
@@ -188,16 +197,30 @@ protected:
                     max_row = k;
                 }
             }
-
             if (max_val < 1e-12) return false;
+            if (i != max_row) {
+                std::swap(A_lu[i], A_lu[max_row]);
+                std::swap(pivot[i], pivot[max_row]);
+            }
 
-            std::swap(A_lu[i], A_lu[max_row]);
-            std::swap(pivot[i], pivot[max_row]);
+            // --- Vectorized numerical loops ---
+            // Invert the diagonal element once
+            const double inv_diag = 1.0 / A_lu[i][i];
 
+            // This outer loop is still serial
             for (size_t j = i + 1; j < NumUnknowns; ++j) {
-                A_lu[j][i] /= A_lu[i][i];
+                // Isolate the multiplier to help the compiler
+                const double multiplier = A_lu[j][i] * inv_diag;
+                A_lu[j][i] = multiplier;
+
+                // Get raw pointers and apply the RESTRICT hint
+                double* RESTRICT row_j = &A_lu[j][0];
+                const double* RESTRICT row_i = &A_lu[i][0];
+
+                // This inner loop is the primary target for SIMD vectorization.
+                // It performs a vector operation: row_j -= multiplier * row_i
                 for (size_t k = i + 1; k < NumUnknowns; ++k) {
-                    A_lu[j][k] -= A_lu[j][i] * A_lu[i][k];
+                    row_j[k] -= multiplier * row_i[k];
                 }
             }
         }
