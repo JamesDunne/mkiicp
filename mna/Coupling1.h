@@ -34,35 +34,44 @@ private:
 
     // This stage is linear, so we can solve it in one step.
     void solve(double in) {
-        resetMatrices();
-        
-        // --- Stamp static components ---
-        stampResistor(V_N011, V_N024, R21);
-        stampResistor(V_N029, GND, R22);
+        if (isDirty) {
+            for(auto& row : A) row.fill(0.0);
 
-        // --- Stamp potentiometer ---
-        stampResistor(V_N024, V_N029, RA_LEAD_DRIVE);
-        stampResistor(V_N029, GND, RC_LEAD_DRIVE);
-        
-        // --- Stamp capacitor C21 (connected between input 'in' and node V_N011) ---
-        // This is a special case since one side is connected to a known voltage 'in'
-        // instead of another unknown node in our system.
+            // --- Stamp static components ---
+            stampResistor(V_N011, V_N024, R21);
+            stampResistor(V_N029, GND, R22);
+
+            // --- Stamp potentiometer ---
+            stampResistor(V_N024, V_N029, RA_LEAD_DRIVE);
+            stampResistor(V_N029, GND, RC_LEAD_DRIVE);
+
+            // --- Stamp capacitor C21 (connected between input 'in' and node V_N011) ---
+            // This is a special case since one side is connected to a known voltage 'in'
+            // instead of another unknown node in our system.
+            double Gc = invT_2 * C21;
+
+            // Stamp conductance Gc at the V_N011 node
+            A[V_N011][V_N011] += Gc;
+
+            // --- Solve the linear system ---
+            if (!lu_decompose()) {
+                x.fill(0.0); // Should not happen in a passive network
+            }
+
+            isDirty = false;
+        }
+
         double Gc = invT_2 * C21;
         double Ic_hist = cap_z_state[0];
-        
-        // Stamp conductance Gc at the V_N011 node
-        A[V_N011][V_N011] += Gc;
-        
+
+        b.fill(0.0);
+
         // Stamp the equivalent current source for the capacitor.
         // I_eq = I_history + Gc * v_in
-        b[V_N011] += Ic_hist + Gc * in;
-        
+        b[V_N011] = Ic_hist + Gc * in;
+
         // --- Solve the linear system ---
-        if (lu_decompose()) {
-            lu_solve(x);
-        } else {
-            x.fill(0.0); // Should not happen in a passive network
-        }
+        lu_solve(x);
     }
 
 public:
@@ -82,12 +91,13 @@ public:
         double p = val * val;
         RA_LEAD_DRIVE = 1e6 * (1.0 - p);
         RC_LEAD_DRIVE = 1e6 * p;
+        setDirty();
     }
 
     double process(double in) {
         // Solve the linear system for the current input 'in'
         solve(in);
-        
+
         // Update capacitor state for the next time step.
         // The voltage across the cap is v_n11 - v_in.
         updateCapacitorState(x[V_N011], in, C21, cap_z_state[0]);
