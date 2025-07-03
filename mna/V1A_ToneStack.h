@@ -24,6 +24,36 @@ private:
 
     const double VE = 405.0;
 
+    void stampLinear() override {
+        // Stamp all resistors, as they only change when a pot moves.
+        // The power supply contribution is also linear.
+        stampResistorLinear(V_N004, GND, R4);
+        b_linear[V_N004] += VE / R4;
+        stampResistorLinear(V_N033, GND, R2);
+        stampResistorLinear(V_N019, GND, R1);
+        stampResistorLinear(V_N004, V_N015, R5);
+        stampResistorLinear(V_N008, V_N007, R5A);
+        stampResistorLinear(V_N020, V_N008, RA_VOLUME1);
+        stampResistorLinear(GND, V_N020, RC_VOLUME1);
+        stampResistorLinear(V_N005, V_N007, RA_TREBLE);
+        stampResistorLinear(V_N007, V_N016, RC_TREBLE);
+        stampResistorLinear(V_N016, V_N028, RA_BASS);
+        stampResistorLinear(V_N028, GND, RA_MID);
+    }
+
+    void stampDynamic(double in) override {
+        // Stamp the input signal source
+        stampVoltageSource(V_N019, GND, 0, in);
+        // Stamp all capacitors
+        stampCapacitor(V_N033, GND, C1, cap_z_state[0]);
+        stampCapacitor(V_N033, GND, C2, cap_z_state[1]);
+        stampCapacitor(V_N028, V_N015, C3, cap_z_state[2]);
+        stampCapacitor(V_N016, V_N015, C4, cap_z_state[3]);
+        stampCapacitor(V_N005, V_N004, C5, cap_z_state[4]);
+        stampCapacitor(V_N005, V_N004, C6, cap_z_state[5]);
+        stampCapacitor(V_N020, V_N008, C13B, cap_z_state[6]);
+    }
+
     void stampComponents(double inputVoltage) {
         resetMatrices();
 
@@ -53,7 +83,7 @@ private:
     }
 
     // stampNonLinear is unchanged
-    void stampNonLinear(const std::array<double, NumUnknowns>& current_x) {
+    void stampNonLinear(const std::array<double, NumUnknowns>& current_x) override {
         double v_p = current_x[V_N004];
         double v_g = current_x[V_N019];
         double v_c = current_x[V_N033];
@@ -85,28 +115,8 @@ public:
     void setMid(double val)     { RA_MID = 10e3 * (val * val); }
 
     double process(double in) {
-        const int MAX_ITER = 15;
-        const double CONVERGENCE_THRESH = 1e-6;
+        solveNonlinear(in);
 
-        std::array<double, NumUnknowns> current_x = x;
-        for (int i = 0; i < MAX_ITER; ++i) {
-            stampComponents(in);
-            stampNonLinear(current_x);
-            if (!lu_decompose()) { return 0.0; }
-
-            std::array<double, NumUnknowns> next_x;
-            lu_solve(next_x);
-            double norm = 0.0;
-            for(size_t j = 0; j < NumUnknowns; ++j) {
-                double diff = next_x[j] - current_x[j];
-                norm += diff * diff;
-            }
-            current_x = next_x;
-            if (sqrt(norm) < CONVERGENCE_THRESH) { break; }
-        }
-        x = current_x;
-
-        // --- Use new capacitor state update method ---
         updateCapacitorState(x[V_N033], 0, C1, cap_z_state[0]);
         updateCapacitorState(x[V_N033], 0, C2, cap_z_state[1]);
         updateCapacitorState(x[V_N028], x[V_N015], C3, cap_z_state[2]);
