@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.31)
 project(mna)
 
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O3 -fno-strict-aliasing -ffast-math")
 
 add_executable(mna main.cpp
         Triode.h
