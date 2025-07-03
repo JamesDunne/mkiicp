@@ -56,13 +56,8 @@ private:
 
     void stampLinear() override {
         // --- Stamp static parts of Voltage Sources into A_linear ---
-        // Input Source (v_idx=0). The voltage value is dynamic, but its place in the matrix is not.
-        A_linear[V_N023][NumNodes + 0] += 1.0;
-        A_linear[NumNodes + 0][V_N023] += 1.0;
-        // Power Supply Source (v_idx=1). This is completely static.
-        A_linear[V_N006][NumNodes + 1] += 1.0;
-        A_linear[NumNodes + 1][V_N006] += 1.0;
-        b_linear[NumNodes + 1] = VC2;
+        stampVoltageSource_A(V_N023, GND, 0); // inputVoltage
+        stampVoltageSource_A(V_N006, GND, 1); // VC2
 
         // --- Stamp all Resistors ---
         stampResistorLinear(V_N012, V_N006, R19);
@@ -78,7 +73,8 @@ private:
 
     void stampDynamic(double in) override {
         // Set the dynamic input voltage value in the b vector
-        b[NumNodes + 0] = in;
+        stampVoltageSource_b(0, in);
+        stampVoltageSource_b(1, VC2);
 
         // Stamp the dynamic history currents of the capacitors
         stampCapacitor_b(V_N031, GND, cap_z_state[0]);

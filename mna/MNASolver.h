@@ -136,6 +136,30 @@ protected:
         b[idx] += voltage;
     }
 
+    /**
+     * @brief Stamps the LINEAR part (topology) of a voltage source into A_linear.
+     * This should be called from within a derived class's stampLinear() override.
+     */
+    void stampVoltageSource_A(int n_p, int n_n, int v_idx) {
+        int idx = NumNodes + v_idx;
+        if (n_p != -1) {
+            A_linear[n_p][idx] += 1.0;
+            A_linear[idx][n_p] += 1.0;
+        }
+        if (n_n != -1) {
+            A_linear[n_n][idx] -= 1.0;
+            A_linear[idx][n_n] -= 1.0;
+        }
+    }
+
+    /**
+     * @brief Stamps the DYNAMIC part (voltage value) of a voltage source into the main b vector.
+     * This should be called from within a derived class's stampDynamic() override.
+     */
+    void stampVoltageSource_b(int v_idx, double voltage) {
+        b[NumNodes + v_idx] = voltage; // Use '=' instead of '+=' as it's the only source here
+    }
+
     void stampConductance(int n1, int n2, double g) {
         if (n1 != -1) A[n1][n1] += g;
         if (n2 != -1) A[n2][n2] += g;

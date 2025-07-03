@@ -61,14 +61,8 @@ private:
     const double VC2 = 410.0;
 
     void stampLinear() override {
-        // Stamp power supply (it's constant)
-        int v_idx = 1; // Supply is the second VSource
-        int idx = NumNodes + v_idx;
-        if (V_N006 != -1) {
-            A_linear[V_N006][idx] += 1.0;
-            A_linear[idx][V_N006] += 1.0;
-        }
-        b_linear[idx] += VC2;
+        stampVoltageSource_A(V_N002, GND, 0); // in
+        stampVoltageSource_A(V_N006, GND, 1); // VC2
 
         // Stamp all resistors (they are constant)
         stampResistorLinear(V_N021, V_N006, R13);
@@ -80,17 +74,21 @@ private:
         stampResistorLinear(V_N032, GND, R101);
         stampResistorLinear(V_N023, V_N032, R12);
         stampResistorLinear(V_N023, GND, R103);
+
+        // Stamp the constant, linear part of the capacitors
+        stampCapacitor_A(V_N002, GND, C11);
+        stampCapacitor_A(V_P001, V_N021, C9);
     }
 
     // 2. Stamps components that change each sample.
     void stampDynamic(double in) override {
         // Stamp the input signal source
-        stampVoltageSource(V_N002, GND, 0, in);
+        stampVoltageSource_b(0, in);
+        stampVoltageSource_b(1, VC2);
 
-        // Stamp the capacitors (their conductance is constant, but their
-        // history current source changes each sample)
-        stampCapacitor(V_N002, GND, C11, cap_z_state[0]);
-        stampCapacitor(V_P001, V_N021, C9, cap_z_state[1]);
+        // Stamp only the dynamic history current of the capacitors
+        stampCapacitor_b(V_N002, GND, cap_z_state[0]);    // C11
+        stampCapacitor_b(V_P001, V_N021, cap_z_state[1]); // C9
     }
 
     void stampNonLinear(const std::array<double, NumUnknowns>& current_x) override {

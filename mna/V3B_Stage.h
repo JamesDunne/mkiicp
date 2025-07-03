@@ -55,7 +55,37 @@ private:
         stampCapacitor(V_N030, GND, C24, cap_z_state[3]);       // Coupling Low-pass Cap
     }
 
-    void stampNonLinear(const std::array<double, NumUnknowns>& current_x) {
+    void stampLinear() override {
+        // --- Sources ---
+        stampVoltageSource_A(V_N029, GND, 0);
+        stampVoltageSource_A(V_N010, GND, 1);
+
+        // --- Static Components ---
+        stampResistorLinear(V_N017, V_N010, R26); // V3B Plate Load
+        stampResistorLinear(V_N035, GND, R23);    // V3B Cathode Resistor
+        stampResistorLinear(V_N030, V_N018, R25); // Coupling Resistor
+        stampResistorLinear(V_N030, GND, R24);    // Coupling Load Resistor
+
+        // --- Capacitors ---
+        stampCapacitor_A(V_N035, GND, C23);       // V3B Cathode Bypass
+        stampCapacitor_A(V_N035, V_N029, C22);    // V3B High-cut
+        stampCapacitor_A(V_N018, V_N017, C25);    // Output Coupling Cap
+        stampCapacitor_A(V_N030, GND, C24);       // Coupling Low-pass Cap
+    }
+
+    void stampDynamic(double in) override {
+        // --- Sources ---
+        stampVoltageSource_b(0, in);
+        stampVoltageSource_b(1, VC);
+
+        // --- Capacitors ---
+        stampCapacitor_b(V_N035, GND, cap_z_state[0]);       // C23 - V3B Cathode Bypass
+        stampCapacitor_b(V_N035, V_N029, cap_z_state[1]);    // C22 - V3B High-cut
+        stampCapacitor_b(V_N018, V_N017, cap_z_state[2]);    // C25 - Output Coupling Cap
+        stampCapacitor_b(V_N030, GND, cap_z_state[3]);       // C24 - Coupling Low-pass Cap
+    }
+
+    void stampNonLinear(const std::array<double, NumUnknowns>& current_x) override {
         // XV3B: Plate=N017, Grid=N029, Cathode=N035
         double v_p = current_x[V_N017];
         double v_g = current_x[V_N029];
@@ -92,30 +122,7 @@ public:
     }
 
     double process(double in) {
-        const int MAX_ITER = 15;
-        const double CONVERGENCE_THRESH = 1e-6;
-
-        std::array<double, NumUnknowns> current_x = x;
-
-        for (int i = 0; i < MAX_ITER; ++i) {
-            stampComponents(in);
-            stampNonLinear(current_x);
-
-            if (!lu_decompose()) { return 0.0; }
-
-            std::array<double, NumUnknowns> next_x;
-            lu_solve(next_x);
-
-            double norm = 0.0;
-            for(size_t j = 0; j < NumUnknowns; ++j) {
-                double diff = next_x[j] - current_x[j];
-                norm += diff * diff;
-            }
-            current_x = next_x;
-
-            if (sqrt(norm) < CONVERGENCE_THRESH) { break; }
-        }
-        x = current_x;
+        solveNonlinear(in);
 
         updateCapacitorState(x[V_N035], 0, C23, cap_z_state[0]);
         updateCapacitorState(x[V_N035], x[V_N029], C22, cap_z_state[1]);

@@ -20,11 +20,14 @@ private:
     double RA_VOLUME1, RC_VOLUME1, RA_TREBLE, RC_TREBLE, RA_BASS, RA_MID;
 
     // CORRECTED: State variables for capacitors (z-domain history)
-    std::vector<double> cap_z_state;
+    std::array<double, 7> cap_z_state;
 
     const double VE = 405.0;
 
     void stampLinear() override {
+        // Stamp the input signal source
+        stampVoltageSource_A(V_N019, GND, 0);
+
         // Stamp all resistors, as they only change when a pot moves.
         // The power supply contribution is also linear.
         stampResistorLinear(V_N004, GND, R4);
@@ -52,7 +55,8 @@ private:
 
     void stampDynamic(double in) override {
         // Stamp the input signal source
-        stampVoltageSource(V_N019, GND, 0, in);
+        stampVoltageSource_b(0, in);
+
         // Stamp only the dynamic history current of the capacitors
         stampCapacitor_b(V_N033, GND, cap_z_state[0]);      // C1
         stampCapacitor_b(V_N033, GND, cap_z_state[1]);      // C2
@@ -110,7 +114,7 @@ private:
     }
 
 public:
-    V1A_ToneStack() : cap_z_state(7, 0.0) { // Changed name from cap_hist
+    V1A_ToneStack() : cap_z_state() { // Changed name from cap_hist
         R1 = 1e6; R2 = 1.5e3; R4 = 150e3; R5 = 100e3; R5A = 100e3;
         C1 = 0.47e-6; C2 = 22e-6; C3 = 0.047e-6; C4 = 0.1e-6;
         C5 = 250e-12; C6 = 750e-12; C13B = 180e-12;

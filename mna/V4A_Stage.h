@@ -51,7 +51,32 @@ private:
         stampCapacitor(V_N002, GND, C32, cap_z_state[3]);
     }
 
-    void stampNonLinear(const std::array<double, NumUnknowns>& current_x) {
+    void stampLinear() override {
+        stampVoltageSource_A(V_N030, GND, 0); // inputVoltage
+        stampVoltageSource_A(V_N010, GND, 1); // VC
+
+        stampResistorLinear(V_N025, V_N010, R27);
+        stampResistorLinear(V_N034, GND, R30);
+        stampResistorLinear(V_N002, V_N026, R31);
+        stampResistorLinear(V_N002, GND, R32);
+
+        stampCapacitor_A(V_N034, GND, C29);
+        stampCapacitor_A(V_N026, V_N025, C30);
+        stampCapacitor_A(V_N002, V_N026, C31);
+        stampCapacitor_A(V_N002, GND, C32);
+    }
+
+    void stampDynamic(double in) override {
+        stampVoltageSource_b(0, in);
+        stampVoltageSource_b(1, VC);
+
+        stampCapacitor_b(V_N034, GND, cap_z_state[0]);    // C29
+        stampCapacitor_b(V_N026, V_N025, cap_z_state[1]); // C30
+        stampCapacitor_b(V_N002, V_N026, cap_z_state[2]); // C31
+        stampCapacitor_b(V_N002, GND, cap_z_state[3]);    // C32
+    }
+
+    void stampNonLinear(const std::array<double, NumUnknowns>& current_x) override {
         double v_p = current_x[V_N025];
         double v_g = current_x[V_N030];
         double v_c = current_x[V_N034];
@@ -79,21 +104,7 @@ public:
     }
 
     double process(double in) {
-        const int MAX_ITER = 15;
-        const double CONVERGENCE_THRESH = 1e-6;
-        std::array<double, NumUnknowns> current_x = x;
-        for (int i = 0; i < MAX_ITER; ++i) {
-            stampComponents(in);
-            stampNonLinear(current_x);
-            if (!lu_decompose()) { return 0.0; }
-            std::array<double, NumUnknowns> next_x;
-            lu_solve(next_x);
-            double norm = 0.0;
-            for(size_t j=0; j<NumUnknowns; ++j) { norm += (next_x[j] - current_x[j])*(next_x[j] - current_x[j]); }
-            current_x = next_x;
-            if (sqrt(norm) < CONVERGENCE_THRESH) { break; }
-        }
-        x = current_x;
+        solveNonlinear(in);
 
         updateCapacitorState(x[V_N034], 0, C29, cap_z_state[0]);
         updateCapacitorState(x[V_N026], x[V_N025], C30, cap_z_state[1]);
