@@ -45,10 +45,10 @@ private:
     }
 
     // --- LUT Configuration and State ---
-    static constexpr int VG_STEPS = 400;
-    static constexpr int VP_STEPS = 400;
-    static constexpr double MIN_VG = -50.0, MAX_VG = 5.0;
-    static constexpr double MIN_VP = -10.0, MAX_VP = 450.0;
+    static constexpr int VG_STEPS = 1000;
+    static constexpr int VP_STEPS = 1000;
+    static constexpr double MIN_VG = -50.0, MAX_VG = 2.0;
+    static constexpr double MIN_VP = 0.0, MAX_VP = 1000.0;
 
     // Using 'inline' for C++17+ allows definition in the header
     inline static std::vector<State> lut;
@@ -115,6 +115,7 @@ private:
     }
 
 public:
+#ifdef USE_TRIODE_CACHE
     /**
      * @brief Initializes the lookup table. Must be called once before any audio processing.
      */
@@ -144,6 +145,11 @@ public:
      * @brief Calculates the triode state using fast bilinear interpolation from the LUT.
      */
     static State calculate(double v_p, double v_g) {
+        if (v_p < min_v_p) min_v_p = v_p;
+        if (v_p > max_v_p) max_v_p = v_p;
+        if (v_g < min_v_g) min_v_g = v_g;
+        if (v_g > max_v_g) max_v_g = v_g;
+
         // Clamp inputs to the defined range of the LUT
         v_g = std::clamp(v_g, MIN_VG, MAX_VG);
         v_p = std::clamp(v_p, MIN_VP, MAX_VP);
@@ -168,5 +174,23 @@ public:
         State s0 = interpolateState(s00, s01, vp_t); // Lerp along plate voltage axis for lower grid voltage
         State s1 = interpolateState(s10, s11, vp_t); // Lerp along plate voltage axis for upper grid voltage
         return interpolateState(s0, s1, vg_t);       // Lerp along grid voltage axis
+    }
+#else
+    static State calculate(double v_p, double v_g) {
+        if (v_p < min_v_p) min_v_p = v_p;
+        if (v_p > max_v_p) max_v_p = v_p;
+        if (v_g < min_v_g) min_v_g = v_g;
+        if (v_g > max_v_g) max_v_g = v_g;
+        return calculateDirectly(v_p, v_g);
+    }
+
+    static void initializeLUT() {}
+#endif
+    inline static double min_v_p = 1e6, max_v_p = -1e6;
+    inline static double min_v_g = 1e6, max_v_g = -1e6;
+
+    static void printStats() {
+        std::cout << "v_p min " << min_v_p << " max " << max_v_p << std::endl;
+        std::cout << "v_g min " << min_v_g << " max " << max_v_g << std::endl;
     }
 };

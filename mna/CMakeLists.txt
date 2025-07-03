@@ -15,3 +15,5 @@ add_executable(mna main.cpp
         WaveFile.h
         MixerAndV2B.h
         V2A_OutputStage.h)
+
+target_compile_definitions(mna PUBLIC USE_TRIODE_CACHE)

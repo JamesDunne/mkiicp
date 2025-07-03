@@ -47,5 +47,7 @@ int main(int argc, const char *argv[]) {
 
     std::cout << min << " " << max << std::endl;
 
+    Triode::printStats();
+
     return 0;
 }
