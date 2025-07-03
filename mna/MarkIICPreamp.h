@@ -55,9 +55,10 @@ public:
         // return out_s4;
 
         double out_s5 = v4a.process(out_s4);
-        return out_s5;
+        // return out_s5;
 
-        double out_s8 = mixerv2b.process(out_s3, out_s5); // Mixer stage
+        // Mixer stage:
+        double out_s8 = mixerv2b.process(out_s5, out_s3);
         return out_s8;
         // double out_s9 = stage9.process(out_s8);
 
