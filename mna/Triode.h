@@ -1,12 +1,12 @@
 #pragma once
 #include <cmath>
 #include <algorithm> // For std::max
+#include <unordered_set>
 
 // Model parameters for a 12AX7 triode based on the SPICE model
 // .SUBCKT 12AX7 1 2 3; A G C;
 // X1 1 2 3 TriodeK MU=96.20 EX=1.437 KG1=613.4 KP=740.3 KVB=1672. RGI=2000
 class Triode {
-private:
     // Koren Tube Model Parameters
     static constexpr double MU = 96.20;  // Amplification Factor
     static constexpr double EX = 1.437;  // Exponent
@@ -28,8 +28,35 @@ public:
         double g_ig; // Grid Conductance (dIg/dVg)
     };
 
+private:
+    // --- Linear Interpolation Helpers ---
+    static inline double lerp(double a, double b, double t) {
+        return a + t * (b - a);
+    }
+
+    static State interpolateState(const State& s1, const State& s2, double t) {
+        State result;
+        result.ip = lerp(s1.ip, s2.ip, t);
+        result.ig = lerp(s1.ig, s2.ig, t);
+        result.g_p = lerp(s1.g_p, s2.g_p, t);
+        result.g_g = lerp(s1.g_g, s2.g_g, t);
+        result.g_ig = lerp(s1.g_ig, s2.g_ig, t);
+        return result;
+    }
+
+    // --- LUT Configuration and State ---
+    static constexpr int VG_STEPS = 400;
+    static constexpr int VP_STEPS = 400;
+    static constexpr double MIN_VG = -50.0, MAX_VG = 5.0;
+    static constexpr double MIN_VP = -10.0, MAX_VP = 450.0;
+
+    // Using 'inline' for C++17+ allows definition in the header
+    inline static std::vector<State> lut;
+    inline static double vg_step, vp_step, inv_vg_step, inv_vp_step;
+    inline static bool lut_initialized = false;
+
     // Calculates the state of the triode given plate-cathode and grid-cathode voltages
-    static State calculate(double v_p, double v_g) {
+    static State calculateDirectly(double v_p, double v_g) {
         State s = {0.0, 0.0, 1e-12, 1e-12, 1e-12}; // Initialize with tiny conductances for stability
 
         // --- Plate Current Calculation (Koren Model) ---
@@ -85,5 +112,61 @@ public:
         s.g_ig = std::max(1e-12, s.g_ig);
 
         return s;
+    }
+
+public:
+    /**
+     * @brief Initializes the lookup table. Must be called once before any audio processing.
+     */
+    static void initializeLUT() {
+        if (lut_initialized) return;
+
+        std::cout << "Initializing 12AX7 lookup table..." << std::endl;
+
+        lut.resize(VG_STEPS * VP_STEPS);
+        vg_step = (MAX_VG - MIN_VG) / (VG_STEPS - 1);
+        vp_step = (MAX_VP - MIN_VP) / (VP_STEPS - 1);
+        inv_vg_step = 1.0 / vg_step;
+        inv_vp_step = 1.0 / vp_step;
+
+        for (int i = 0; i < VG_STEPS; ++i) {
+            double v_g = MIN_VG + i * vg_step;
+            for (int j = 0; j < VP_STEPS; ++j) {
+                double v_p = MIN_VP + j * vp_step;
+                lut[i * VP_STEPS + j] = calculateDirectly(v_p, v_g);
+            }
+        }
+        lut_initialized = true;
+        std::cout << "12AX7 lookup table initialized." << std::endl;
+    }
+
+    /**
+     * @brief Calculates the triode state using fast bilinear interpolation from the LUT.
+     */
+    static State calculate(double v_p, double v_g) {
+        // Clamp inputs to the defined range of the LUT
+        v_g = std::clamp(v_g, MIN_VG, MAX_VG);
+        v_p = std::clamp(v_p, MIN_VP, MAX_VP);
+
+        // Find grid position and interpolation weight
+        double vg_pos = (v_g - MIN_VG) * inv_vg_step;
+        int vg_idx = static_cast<int>(vg_pos);
+        double vg_t = vg_pos - vg_idx;
+
+        // Find plate position and interpolation weight
+        double vp_pos = (v_p - MIN_VP) * inv_vp_step;
+        int vp_idx = static_cast<int>(vp_pos);
+        double vp_t = vp_pos - vp_idx;
+
+        // Get the four corner points from the LUT for interpolation
+        const State& s00 = lut[vg_idx * VP_STEPS + vp_idx];
+        const State& s10 = lut[(vg_idx + 1) * VP_STEPS + vp_idx];
+        const State& s01 = lut[vg_idx * VP_STEPS + (vp_idx + 1)];
+        const State& s11 = lut[(vg_idx + 1) * VP_STEPS + (vp_idx + 1)];
+
+        // Bilinear interpolation
+        State s0 = interpolateState(s00, s01, vp_t); // Lerp along plate voltage axis for lower grid voltage
+        State s1 = interpolateState(s10, s11, vp_t); // Lerp along plate voltage axis for upper grid voltage
+        return interpolateState(s0, s1, vg_t);       // Lerp along grid voltage axis
     }
 };

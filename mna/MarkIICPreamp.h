@@ -22,7 +22,9 @@ private:
     V2A_OutputStage v2aOutput;
 
 public:
-    MarkIICPreamp() = default;
+    MarkIICPreamp() {
+        Triode::initializeLUT();
+    }
 
     void setup(double sampleRate) {
         v1aToneStack.setup(sampleRate);

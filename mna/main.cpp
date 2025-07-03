@@ -27,6 +27,8 @@ int main(int argc, const char *argv[]) {
     }
 #endif
 
+    auto start = std::chrono::high_resolution_clock::now();
+
     double min = 1.0, max = -1.0;
     processWavFile(
         argv[1],
@@ -38,6 +40,10 @@ int main(int argc, const char *argv[]) {
             return out / 410.0;
         }
     );
+
+    auto end = std::chrono::high_resolution_clock::now();
+
+    std::cout << "time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << std::endl;
 
     std::cout << min << " " << max << std::endl;
 
