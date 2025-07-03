@@ -289,4 +289,68 @@ protected:
         }
         x = current_x; // Store result even if not fully converged
     }
+
+    // --- NEW: Simplified Newton Method for High Performance ---
+    void solveNonlinear_Simplified(double in) {
+        if (isDirty) {
+            A_linear.fill({});
+            b_linear.fill({});
+            stampLinear();
+            isDirty = false;
+        }
+
+        // --- Decompose ONCE per sample ---
+        // First, build the Jacobian matrix A using the solution from the previous sample
+        // as the linearization point. This is a good starting guess.
+        A = A_linear;
+        stampDynamic(in);
+        stampNonLinear(x); // Use last sample's 'x'
+
+        // Decompose the matrix. If this fails, we can't continue.
+        if (!lu_decompose()) {
+            x.fill(0.0);
+            return;
+        }
+        // The LU factorization stored in A_lu will now be re-used for all iterations.
+
+        // --- Iteration Loop ---
+        const int MAX_ITER = 40; // Allow more iterations since convergence is slower
+        const double CONVERGENCE_THRESH = 1e-6;
+        const double DAMPING_LIMIT = 1.0;
+
+        std::array<double, NumUnknowns> current_x = x;
+        for (int i = 0; i < MAX_ITER; ++i) {
+            // Re-build the right-hand side 'b' and the full matrix 'A' at each step.
+            // This is still much faster than re-decomposing.
+            A = A_linear;
+            b = b_linear;
+            stampDynamic(in);
+            stampNonLinear(current_x);
+
+            // Solve using the PRE-CALCULATED LU factorization.
+            std::array<double, NumUnknowns> next_x;
+            lu_solve(next_x);
+
+            // --- Dampening and Convergence Check (unchanged) ---
+            double max_delta = 0.0;
+            for (size_t j = 0; j < NumNodes; ++j) {
+                max_delta = std::max(max_delta, std::abs(next_x[j] - current_x[j]));
+            }
+
+            if (max_delta < CONVERGENCE_THRESH) {
+                x = next_x;
+                return; // Converged
+            }
+
+            if (max_delta > DAMPING_LIMIT) {
+                double scale = DAMPING_LIMIT / max_delta;
+                for (size_t j = 0; j < NumUnknowns; ++j) {
+                    current_x[j] += scale * (next_x[j] - current_x[j]);
+                }
+            } else {
+                current_x = next_x;
+            }
+        }
+        x = current_x;
+    }
 };

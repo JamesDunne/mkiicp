@@ -125,7 +125,8 @@ public:
         double rhythm_processed = rhythmProcessor.process(in_rhythm);
         double input_sum = in_lead + rhythm_processed;
 
-        solveNonlinear(input_sum);
+        // solveNonlinear(input_sum);
+        solveNonlinear_Simplified(input_sum);
 
         updateCapacitorState(x[V_N002], 0, C11, cap_z_state[0]);
         updateCapacitorState(x[V_P001], x[V_N021], C9, cap_z_state[1]);

@@ -128,7 +128,8 @@ public:
     void setMid(double val)     { RA_MID = 10e3 * (val * val); setDirty(); }
 
     double process(double in) {
-        solveNonlinear(in);
+        // solveNonlinear(in);
+        solveNonlinear_Simplified(in);
 
         updateCapacitorState(x[V_N033], 0, C1, cap_z_state[0]);
         updateCapacitorState(x[V_N033], 0, C2, cap_z_state[1]);

@@ -122,7 +122,8 @@ public:
     // No user-adjustable parameters in this stage
 
     double process(double in) {
-        solveNonlinear(in);
+        // solveNonlinear(in);
+        solveNonlinear_Simplified(in);
 
         // Update capacitor states for the next time step
         updateCapacitorState(x[V_N027], 0, C13, cap_z_state[0]);
