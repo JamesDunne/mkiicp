@@ -39,19 +39,28 @@ private:
         stampResistorLinear(V_N007, V_N016, RC_TREBLE);
         stampResistorLinear(V_N016, V_N028, RA_BASS);
         stampResistorLinear(V_N028, GND, RA_MID);
+
+        // Stamp the constant, linear part of the capacitors
+        stampCapacitor_A(V_N033, GND, C1);
+        stampCapacitor_A(V_N033, GND, C2);
+        stampCapacitor_A(V_N028, V_N015, C3);
+        stampCapacitor_A(V_N016, V_N015, C4);
+        stampCapacitor_A(V_N005, V_N004, C5);
+        stampCapacitor_A(V_N005, V_N004, C6);
+        stampCapacitor_A(V_N020, V_N008, C13B);
     }
 
     void stampDynamic(double in) override {
         // Stamp the input signal source
         stampVoltageSource(V_N019, GND, 0, in);
-        // Stamp all capacitors
-        stampCapacitor(V_N033, GND, C1, cap_z_state[0]);
-        stampCapacitor(V_N033, GND, C2, cap_z_state[1]);
-        stampCapacitor(V_N028, V_N015, C3, cap_z_state[2]);
-        stampCapacitor(V_N016, V_N015, C4, cap_z_state[3]);
-        stampCapacitor(V_N005, V_N004, C5, cap_z_state[4]);
-        stampCapacitor(V_N005, V_N004, C6, cap_z_state[5]);
-        stampCapacitor(V_N020, V_N008, C13B, cap_z_state[6]);
+        // Stamp only the dynamic history current of the capacitors
+        stampCapacitor_b(V_N033, GND, cap_z_state[0]);      // C1
+        stampCapacitor_b(V_N033, GND, cap_z_state[1]);      // C2
+        stampCapacitor_b(V_N028, V_N015, cap_z_state[2]);   // C3
+        stampCapacitor_b(V_N016, V_N015, cap_z_state[3]);   // C4
+        stampCapacitor_b(V_N005, V_N004, cap_z_state[4]);   // C5
+        stampCapacitor_b(V_N005, V_N004, cap_z_state[5]);   // C6
+        stampCapacitor_b(V_N020, V_N008, cap_z_state[6]);   // C13B
     }
 
     void stampComponents(double inputVoltage) {
@@ -109,10 +118,10 @@ public:
         setVolume1(0.75); setTreble(0.8); setBass(0.25); setMid(0.5);
     }
 
-    void setVolume1(double val) { double v = val * val; RA_VOLUME1 = 1e6 * (1.0 - v); RC_VOLUME1 = 1e6 * v; }
-    void setTreble(double val)  { double v = val * val; RA_TREBLE = 250e3 * (1.0-v); RC_TREBLE = 250e3 * v; }
-    void setBass(double val)    { RA_BASS = 250e3 * (val * val); }
-    void setMid(double val)     { RA_MID = 10e3 * (val * val); }
+    void setVolume1(double val) { double v = val * val; RA_VOLUME1 = 1e6 * (1.0 - v); RC_VOLUME1 = 1e6 * v; setDirty(); }
+    void setTreble(double val)  { double v = val * val; RA_TREBLE = 250e3 * (1.0-v); RC_TREBLE = 250e3 * v; setDirty(); }
+    void setBass(double val)    { RA_BASS = 250e3 * (val * val); setDirty(); }
+    void setMid(double val)     { RA_MID = 10e3 * (val * val); setDirty(); }
 
     double process(double in) {
         solveNonlinear(in);

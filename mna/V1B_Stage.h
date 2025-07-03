@@ -70,14 +70,19 @@ private:
 
         stampResistorLinear(V_N027, GND, R7);
         stampResistorLinear(V_N001, GND, R9);
+
+        // Stamp the constant, linear part of the capacitors
+        stampCapacitor_A(V_N027, GND, C13);
+        stampCapacitor_A(V_N001, V_N009, C7);
     }
 
     void stampDynamic(double in) override {
         // Stamp the input signal source
         stampVoltageSource(V_N020, GND, 0, in);
-        // Stamp capacitors
-        stampCapacitor(V_N027, GND, C13, cap_z_state[0]);
-        stampCapacitor(V_N001, V_N009, C7, cap_z_state[1]);
+
+        // Stamp only the dynamic history current of the capacitors
+        stampCapacitor_b(V_N027, GND, cap_z_state[0]);    // C13
+        stampCapacitor_b(V_N001, V_N009, cap_z_state[1]); // C7
     }
 
     void stampNonLinear(const std::array<double, NumUnknowns>& current_x) override {

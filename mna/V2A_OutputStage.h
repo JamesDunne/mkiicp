@@ -53,8 +53,40 @@ private:
         stampResistor(V_N013, V_N014, R106);
         stampResistor(V_N014, GND, RA_MASTER); // Correctly represents the pot
     }
-    
-    void stampNonLinear(const std::array<double, NumUnknowns>& current_x) {
+
+    void stampLinear() override {
+        // --- Stamp static parts of Voltage Sources into A_linear ---
+        // Input Source (v_idx=0). The voltage value is dynamic, but its place in the matrix is not.
+        A_linear[V_N023][NumNodes + 0] += 1.0;
+        A_linear[NumNodes + 0][V_N023] += 1.0;
+        // Power Supply Source (v_idx=1). This is completely static.
+        A_linear[V_N006][NumNodes + 1] += 1.0;
+        A_linear[NumNodes + 1][V_N006] += 1.0;
+        b_linear[NumNodes + 1] = VC2;
+
+        // --- Stamp all Resistors ---
+        stampResistorLinear(V_N012, V_N006, R19);
+        stampResistorLinear(V_N031, GND, R104);
+        stampResistorLinear(V_N013, V_N014, R106);
+        stampResistorLinear(V_N014, GND, RA_MASTER); // Includes the master volume pot
+
+        // --- Stamp static (conductance) part of Capacitors ---
+        stampCapacitor_A(V_N031, GND, C15);
+        stampCapacitor_A(V_N031, GND, C16);
+        stampCapacitor_A(V_N013, V_N012, C12);
+    }
+
+    void stampDynamic(double in) override {
+        // Set the dynamic input voltage value in the b vector
+        b[NumNodes + 0] = in;
+
+        // Stamp the dynamic history currents of the capacitors
+        stampCapacitor_b(V_N031, GND, cap_z_state[0]);
+        stampCapacitor_b(V_N031, GND, cap_z_state[1]);
+        stampCapacitor_b(V_N013, V_N012, cap_z_state[2]);
+    }
+
+    void stampNonLinear(const std::array<double, NumUnknowns>& current_x) override {
         // XV2A: Plate=N012, Grid=N023, Cathode=N031
         double v_p = current_x[V_N012];
         double v_g = current_x[V_N023];
@@ -91,44 +123,12 @@ public:
         double p = val * val;
         RA_MASTER = 1e6 * p;
         if (RA_MASTER < 1e-3) RA_MASTER = 1e-3; // Prevent division by zero
+        setDirty();
     }
 
     double process(double in) {
-        const int MAX_ITER = 25;
-        const double CONVERGENCE_THRESH = 1e-6;
-        const double DAMPING_LIMIT = 1.0; 
+        solveNonlinear(in);
 
-        std::array<double, NumUnknowns> current_x = x;
-        for (int i = 0; i < MAX_ITER; ++i) {
-            stampComponents(in);
-            stampNonLinear(current_x);
-            
-            if (!lu_decompose()) { return 0.0; } 
-            
-            std::array<double, NumUnknowns> next_x;
-            lu_solve(next_x);
-
-            double max_delta = 0.0;
-            for (size_t j = 0; j < NumUnknowns; ++j) {
-                max_delta = std::max(max_delta, std::abs(next_x[j] - current_x[j]));
-            }
-
-            if (max_delta < CONVERGENCE_THRESH) {
-                x = next_x;
-                break;
-            }
-
-            if (max_delta > DAMPING_LIMIT) {
-                double scale = DAMPING_LIMIT / max_delta;
-                for (size_t j = 0; j < NumUnknowns; ++j) {
-                    current_x[j] += scale * (next_x[j] - current_x[j]);
-                }
-            } else {
-                current_x = next_x;
-            }
-            x = current_x;
-        }
-        
         updateCapacitorState(x[V_N031], 0, C15, cap_z_state[0]);
         updateCapacitorState(x[V_N031], 0, C16, cap_z_state[1]);
         updateCapacitorState(x[V_N013], x[V_N012], C12, cap_z_state[2]);

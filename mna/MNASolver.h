@@ -91,6 +91,31 @@ protected:
         if (n2 != -1) b[n2] -= z_state;
     }
 
+    /**
+     * @brief Stamps the LINEAR part (conductance) of a capacitor into A_linear.
+     * This should be called from within a derived class's stampLinear() override.
+     */
+    void stampCapacitor_A(int n1, int n2, double C) {
+        double Gc = invT_2 * C;
+        if (n1 != -1) A_linear[n1][n1] += Gc;
+        if (n2 != -1) A_linear[n2][n2] += Gc;
+        if (n1 != -1 && n2 != -1) {
+            A_linear[n1][n2] -= Gc;
+            A_linear[n2][n1] -= Gc;
+        }
+    }
+
+    /**
+     * @brief Stamps the DYNAMIC part (history current source) of a capacitor into b.
+     * This should be called from within a derived class's stampDynamic() override.
+     */
+    void stampCapacitor_b(int n1, int n2, const double& z_state) {
+        // The z_state *is* the history current source I_eq.
+        // Current flows from n2 to n1.
+        if (n1 != -1) b[n1] += z_state;
+        if (n2 != -1) b[n2] -= z_state;
+    }
+
     // Updates the capacitor's history state 'z' for the next time step.
     void updateCapacitorState(double v_n1, double v_n2, double C, double& z_state) {
         double Gc = invT_2 * C;
@@ -187,6 +212,8 @@ protected:
 
     /** @brief Stamps non-linear components (tubes, diodes) into A and b. */
     virtual void stampNonLinear(const std::array<double, NumUnknowns>& current_x) {}
+
+    void setDirty() { isDirty = true; }
 
     // --- NEW: Generic Non-Linear Solver ---
     void solveNonlinear(double in) {
