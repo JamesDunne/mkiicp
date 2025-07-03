@@ -299,20 +299,6 @@ protected:
             isDirty = false;
         }
 
-        // --- Decompose ONCE per sample ---
-        // First, build the Jacobian matrix A using the solution from the previous sample
-        // as the linearization point. This is a good starting guess.
-        A = A_linear;
-        stampDynamic(in);
-        stampNonLinear(x); // Use last sample's 'x'
-
-        // Decompose the matrix. If this fails, we can't continue.
-        if (!lu_decompose()) {
-            x.fill(0.0);
-            return;
-        }
-        // The LU factorization stored in A_lu will now be re-used for all iterations.
-
         // --- Iteration Loop ---
         const int MAX_ITER = 40; // Allow more iterations since convergence is slower
         const double CONVERGENCE_THRESH = 1e-6;
@@ -326,6 +312,12 @@ protected:
             b = b_linear;
             stampDynamic(in);
             stampNonLinear(current_x);
+
+            // Decompose the matrix. If this fails, we can't continue.
+            if (((i & 3) == 0) && !lu_decompose()) {
+                x.fill(0.0);
+                return;
+            }
 
             // Solve using the PRE-CALCULATED LU factorization.
             std::array<double, NumUnknowns> next_x;
