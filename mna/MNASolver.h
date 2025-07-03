@@ -327,8 +327,10 @@ protected:
         const double CONVERGENCE_THRESH = 1e-6;
         const double DAMPING_LIMIT = 1.0;
 
+        int i;
+        double max_delta = 0.0;
         std::array<double, NumUnknowns> current_x = x;
-        for (int i = 0; i < MAX_ITER; ++i) {
+        for (i = 0; i < MAX_ITER; ++i) {
             // Re-build the right-hand side 'b' and the full matrix 'A' at each step.
             // This is still much faster than re-decomposing.
             A = A_linear;
@@ -347,7 +349,7 @@ protected:
             lu_solve(next_x);
 
             // --- Dampening and Convergence Check (unchanged) ---
-            double max_delta = 0.0;
+            max_delta = 0.0;
             for (size_t j = 0; j < NumNodes; ++j) {
                 max_delta = std::max(max_delta, std::abs(next_x[j] - current_x[j]));
             }
@@ -366,6 +368,11 @@ protected:
                 current_x = next_x;
             }
         }
+
+        if (i == MAX_ITER) {
+            std::cerr << "max_delta = " << max_delta << std::endl;
+        }
+
         x = current_x;
     }
 };
