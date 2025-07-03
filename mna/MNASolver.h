@@ -300,7 +300,7 @@ protected:
         }
 
         // --- Iteration Loop ---
-        const int MAX_ITER = 20; // Allow more iterations since convergence is slower
+        const int MAX_ITER = 40; // Allow more iterations since convergence is slower
         const double CONVERGENCE_THRESH = 1e-6;
         const double DAMPING_LIMIT = 1.0;
 
@@ -314,7 +314,7 @@ protected:
             stampNonLinear(current_x);
 
             // Decompose the matrix. If this fails, we can't continue.
-            if (((i & 3) == 0) && !lu_decompose()) {
+            if (((i & 7) == 0) && !lu_decompose()) {
                 x.fill(0.0);
                 return;
             }
