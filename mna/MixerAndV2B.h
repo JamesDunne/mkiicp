@@ -3,11 +3,16 @@
 #include "MNASolver.h"
 #include "Triode.h"
 #include <vector>
+#include <algorithm> // for std::max
+#include <cmath>     // for std::abs, std::sqrt
 
-// This class models the V2B gain stage and its entire surrounding network.
+// This class models the V2B gain stage and its surrounding network.
 //
 // THIS IS THE DEFINITIVE VERSION: It includes the full complex load on the V2B plate,
 // ensuring the DC operating point and AC swing are physically correct.
+//
+// IT NOW INCLUDES A DAMPENED NEWTON-RAPHSON SOLVER to prevent divergence
+// during large signal transients, fixing the "digital clipping" issue.
 //
 // Inputs: `in_lead`, `in_rhythm`.
 // Output: Voltage at node N023 (the grid of the final tube stage, V2A).
@@ -38,7 +43,6 @@ private:
     RhythmPathProcessor rhythmProcessor;
 
     static constexpr int GND = -1;
-    // CORRECTED: Added nodes for the full output load network
     enum Var {
         V_N002 = 0, // V2B Grid
         V_N036,     // V2B Cathode
@@ -114,26 +118,54 @@ public:
         double rhythm_processed = rhythmProcessor.process(in_rhythm);
         double input_sum = in_lead + rhythm_processed;
 
-        const int MAX_ITER = 15;
+        const int MAX_ITER = 25; // Increased iterations slightly for tough cases
         const double CONVERGENCE_THRESH = 1e-6;
+        // DAMPING_LIMIT: Maximum allowed voltage change in a single NR iteration.
+        // This prevents the solver from "running away" with a bad guess.
+        const double DAMPING_LIMIT = 1.0;
+
         std::array<double, NumUnknowns> current_x = x;
         for (int i = 0; i < MAX_ITER; ++i) {
             stampComponents(input_sum);
             stampNonLinear(current_x);
+
             if (!lu_decompose()) { return 0.0; }
+
             std::array<double, NumUnknowns> next_x;
             lu_solve(next_x);
-            double norm = 0.0;
-            for(size_t j=0; j<NumUnknowns; ++j) { norm += (next_x[j] - current_x[j])*(next_x[j] - current_x[j]); }
-            current_x = next_x;
-            if (sqrt(norm) < CONVERGENCE_THRESH) { break; }
+
+            // --- Dampening Logic Start ---
+            double max_delta = 0.0;
+            // Calculate the maximum change for any voltage node
+            for (size_t j = 0; j < NumUnknowns; ++j) {
+                max_delta = std::max(max_delta, std::abs(next_x[j] - current_x[j]));
+            }
+
+            // Check for convergence based on the proposed (undampened) step
+            if (max_delta < CONVERGENCE_THRESH) {
+                x = next_x;
+                break;
+            }
+
+            // If the step is too large, dampen it
+            if (max_delta > DAMPING_LIMIT) {
+                double scale = DAMPING_LIMIT / max_delta;
+                for (size_t j = 0; j < NumUnknowns; ++j) {
+                    current_x[j] += scale * (next_x[j] - current_x[j]);
+                }
+            } else {
+                // Step is safe, take the full step
+                current_x = next_x;
+            }
+            // --- Dampening Logic End ---
+
+            // Update the stored solution for the next sample
+            x = current_x;
         }
-        x = current_x;
 
         updateCapacitorState(x[V_N002], 0, C11, cap_z_state[0]);
         updateCapacitorState(x[V_P001], x[V_N021], C9, cap_z_state[1]);
 
-        // CORRECTED: Return the voltage at the final node N023
         return x[V_N023];
     }
 };
