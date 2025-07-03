@@ -4,6 +4,7 @@
 #include "MixerAndV2B.h"
 #include "V1A_ToneStack.h"
 #include "V1B_Stage.h"
+#include "V2A_OutputStage.h"
 #include "V3B_Stage.h"
 #include "V4A_Stage.h"
 
@@ -18,7 +19,7 @@ private:
     V3B_and_Coupling v3b;
     V4A_and_MixerLoad v4a;
     MixerAndV2B mixerv2b;
-    // V2A_OutputStage stage9;
+    V2A_OutputStage v2aOutput;
 
 public:
     MarkIICPreamp() = default;
@@ -30,6 +31,7 @@ public:
         v3b.setup(sampleRate);
         v4a.setup(sampleRate);
         mixerv2b.setup(sampleRate);
+        v2aOutput.setup(sampleRate);
     }
 
     // Parameter setting methods
@@ -38,7 +40,7 @@ public:
     void setBass(double val) { v1aToneStack.setBass(val); }
     void setMid(double val) { v1aToneStack.setMid(val); }
     void setGain(double val) { v1bCoupling.setGain(val); }
-    // void setMaster(double val) { stage9.setMaster(val); }
+    void setMaster(double val) { v2aOutput.setMaster(val); }
 
     double processSample(double in) {
         double out_s1 = v1aToneStack.process(in);
@@ -59,10 +61,10 @@ public:
 
         // Mixer stage:
         double out_s8 = mixerv2b.process(out_s5, out_s3);
-        return out_s8;
-        // double out_s9 = stage9.process(out_s8);
+        // return out_s8;
 
-        // The final E1 block is a simple gain stage
-        // return out_s9 / 1400.0;
+        // Final V2A output stage:
+        double out_s9 = v2aOutput.process(out_s8);
+        return out_s9;
     }
 };

@@ -13,4 +13,5 @@ add_executable(mna main.cpp
         V3B_Stage.h
         V4A_Stage.h
         WaveFile.h
-        MixerAndV2B.h)
+        MixerAndV2B.h
+        V2A_OutputStage.h)
