@@ -38,7 +38,7 @@ struct WavHeader {
 void processWavFile(
     const std::string& inputFilename,
     const std::string& outputFilename,
-    const std::function<double(double)>& processor
+    const std::function<double(double, long)>& processor
 ) {
     // --- Open Input File ---
     std::ifstream ifs(inputFilename, std::ios::binary);
@@ -109,7 +109,7 @@ void processWavFile(
         }
 
         // 2. Process the sample using the provided function
-        double processed_sample = processor(sample);
+        double processed_sample = processor(sample, i);
 
         // Clamp to prevent audio artifacts from out-of-range values
         processed_sample = std::max(-1.0, std::min(1.0, processed_sample));

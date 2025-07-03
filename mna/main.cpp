@@ -31,7 +31,7 @@ int main(int argc, const char *argv[]) {
     processWavFile(
         argv[1],
         argv[2],
-        [&](double sample) -> double {
+        [&](double sample, long time) -> double {
             double out = preamp.processSample(sample);
             if (out > max) max = out;
             if (out < min) min = out;
