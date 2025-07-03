@@ -60,31 +60,40 @@ private:
     std::vector<double> cap_z_state;
     const double VC2 = 410.0;
 
-    void stampComponents(double input_sum) {
-        resetMatrices();
+    void stampLinear() override {
+        // Stamp power supply (it's constant)
+        int v_idx = 1; // Supply is the second VSource
+        int idx = NumNodes + v_idx;
+        if (V_N006 != -1) {
+            A_linear[V_N006][idx] += 1.0;
+            A_linear[idx][V_N006] += 1.0;
+        }
+        b_linear[idx] += VC2;
 
-        stampVoltageSource(V_N002, GND, 0, input_sum);
-        stampVoltageSource(V_N006, GND, 1, VC2);
-
-        // --- Mixer & V2B Components ---
-        stampResistor(V_N021, V_N006, R13); // Plate load
-        stampResistor(V_N036, GND, R16);    // Cathode resistor
-        stampResistor(V_N002, GND, R11);    // Grid-leak resistor
-        stampCapacitor(V_N002, GND, C11, cap_z_state[0]);
-
-        // --- Full Output Load Network ---
-        stampCapacitor(V_P001, V_N021, C9, cap_z_state[1]); // Output coupling
-        stampResistor(V_N022, V_P001, R105);
-        stampResistor(V_N022, GND, R46);
-
-        // CORRECTED: Add the newly included load resistors
-        stampResistor(V_N022, V_N032, R102);
-        stampResistor(V_N032, GND, R101);
-        stampResistor(V_N023, V_N032, R12);
-        stampResistor(V_N023, GND, R103);
+        // Stamp all resistors (they are constant)
+        stampResistorLinear(V_N021, V_N006, R13);
+        stampResistorLinear(V_N036, GND, R16);
+        stampResistorLinear(V_N002, GND, R11);
+        stampResistorLinear(V_N022, V_P001, R105);
+        stampResistorLinear(V_N022, GND, R46);
+        stampResistorLinear(V_N022, V_N032, R102);
+        stampResistorLinear(V_N032, GND, R101);
+        stampResistorLinear(V_N023, V_N032, R12);
+        stampResistorLinear(V_N023, GND, R103);
     }
 
-    void stampNonLinear(const std::array<double, NumUnknowns>& current_x) {
+    // 2. Stamps components that change each sample.
+    void stampDynamic(double in) override {
+        // Stamp the input signal source
+        stampVoltageSource(V_N002, GND, 0, in);
+
+        // Stamp the capacitors (their conductance is constant, but their
+        // history current source changes each sample)
+        stampCapacitor(V_N002, GND, C11, cap_z_state[0]);
+        stampCapacitor(V_P001, V_N021, C9, cap_z_state[1]);
+    }
+
+    void stampNonLinear(const std::array<double, NumUnknowns>& current_x) override {
         double v_p = current_x[V_N021];
         double v_g = current_x[V_N002];
         double v_c = current_x[V_N036];
@@ -118,50 +127,7 @@ public:
         double rhythm_processed = rhythmProcessor.process(in_rhythm);
         double input_sum = in_lead + rhythm_processed;
 
-        const int MAX_ITER = 25; // Increased iterations slightly for tough cases
-        const double CONVERGENCE_THRESH = 1e-6;
-        // DAMPING_LIMIT: Maximum allowed voltage change in a single NR iteration.
-        // This prevents the solver from "running away" with a bad guess.
-        const double DAMPING_LIMIT = 1.0;
-
-        std::array<double, NumUnknowns> current_x = x;
-        for (int i = 0; i < MAX_ITER; ++i) {
-            stampComponents(input_sum);
-            stampNonLinear(current_x);
-
-            if (!lu_decompose()) { return 0.0; }
-
-            std::array<double, NumUnknowns> next_x;
-            lu_solve(next_x);
-
-            // --- Dampening Logic Start ---
-            double max_delta = 0.0;
-            // Calculate the maximum change for any voltage node
-            for (size_t j = 0; j < NumUnknowns; ++j) {
-                max_delta = std::max(max_delta, std::abs(next_x[j] - current_x[j]));
-            }
-
-            // Check for convergence based on the proposed (undampened) step
-            if (max_delta < CONVERGENCE_THRESH) {
-                x = next_x;
-                break;
-            }
-
-            // If the step is too large, dampen it
-            if (max_delta > DAMPING_LIMIT) {
-                double scale = DAMPING_LIMIT / max_delta;
-                for (size_t j = 0; j < NumUnknowns; ++j) {
-                    current_x[j] += scale * (next_x[j] - current_x[j]);
-                }
-            } else {
-                // Step is safe, take the full step
-                current_x = next_x;
-            }
-            // --- Dampening Logic End ---
-
-            // Update the stored solution for the next sample
-            x = current_x;
-        }
+        solveNonlinear(input_sum);
 
         updateCapacitorState(x[V_N002], 0, C11, cap_z_state[0]);
         updateCapacitorState(x[V_P001], x[V_N021], C9, cap_z_state[1]);

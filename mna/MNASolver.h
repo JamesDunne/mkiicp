@@ -6,12 +6,13 @@
 #include <cstddef>
 #include <numeric>
 
-template <size_t NumNodes, size_t NumVsrc>
+template <size_t Ns, size_t Vs>
 class MNASolver {
 public:
-    static constexpr size_t NumUnknowns = NumNodes + NumVsrc;
+    static constexpr size_t NumUnknowns = Ns + Vs;
+    static constexpr size_t NumNodes = Ns;
 
-    MNASolver() : sampleRate(48000.0), T(1.0 / 48000.0) {
+    MNASolver() : sampleRate(48000.0), T(1.0 / 48000.0), isDirty(true) {
         x.fill(0.0);
         A.fill({});
         b.fill(0.0);
@@ -25,6 +26,7 @@ public:
         T = 1.0 / sampleRate;
         invT_2 = 2.0 / T;
         x.fill(0.0);
+        isDirty = true;
     }
 
 protected:
@@ -32,6 +34,11 @@ protected:
     std::array<std::array<double, NumUnknowns>, NumUnknowns> A;
     std::array<double, NumUnknowns> x; // Solution vector [node voltages..., vsrc currents...]
     std::array<double, NumUnknowns> b; // Sources vector
+
+    // A matrix containing only the contributions from linear components (R, C conductance)
+    std::array<std::array<double, NumUnknowns>, NumUnknowns> A_linear;
+    std::array<double, NumUnknowns> b_linear;
+    bool isDirty;
 
     // LU factorization state
     std::array<std::array<double, NumUnknowns>, NumUnknowns> A_lu;
@@ -52,6 +59,17 @@ protected:
         if (n1 != -1 && n2 != -1) {
             A[n1][n2] -= G;
             A[n2][n1] -= G;
+        }
+    }
+
+    // Helper to stamp into the linear matrix
+    void stampResistorLinear(int n1, int n2, double R) {
+        double G = 1.0 / R;
+        if (n1 != -1) A_linear[n1][n1] += G;
+        if (n2 != -1) A_linear[n2][n2] += G;
+        if (n1 != -1 && n2 != -1) {
+            A_linear[n1][n2] -= G;
+            A_linear[n2][n1] -= G;
         }
     }
 
@@ -81,7 +99,7 @@ protected:
     }
 
     void stampVoltageSource(int n_p, int n_n, int v_idx, double voltage) {
-        int idx = NumNodes + v_idx;
+        int idx = Ns + v_idx;
         if (n_p != -1) {
             A[n_p][idx] += 1.0;
             A[idx][n_p] += 1.0;
@@ -159,5 +177,65 @@ protected:
     void resetMatrices() {
         for(auto& row : A) row.fill(0.0);
         b.fill(0.0);
+    }
+
+    /** @brief Stamps constant components (resistors, fixed sources) into A_linear and b_linear. */
+    virtual void stampLinear() {}
+
+    /** @brief Stamps components that change each sample (inputs, capacitors) into A and b. */
+    virtual void stampDynamic(double in) {}
+
+    /** @brief Stamps non-linear components (tubes, diodes) into A and b. */
+    virtual void stampNonLinear(const std::array<double, NumUnknowns>& current_x) {}
+
+    // --- NEW: Generic Non-Linear Solver ---
+    void solveNonlinear(double in) {
+        if (isDirty) {
+            A_linear.fill({});
+            b_linear.fill({});
+            stampLinear();
+            isDirty = false;
+        }
+
+        const int MAX_ITER = 25;
+        const double CONVERGENCE_THRESH = 1e-6;
+        const double DAMPING_LIMIT = 1.0;
+
+        std::array<double, NumUnknowns> current_x = x;
+        for (int i = 0; i < MAX_ITER; ++i) {
+            A = A_linear;
+            b = b_linear;
+
+            stampDynamic(in);
+            stampNonLinear(current_x);
+
+            if (!lu_decompose()) {
+                x.fill(0.0); // Recover from singular matrix
+                return;
+            }
+
+            std::array<double, NumUnknowns> next_x;
+            lu_solve(next_x);
+
+            double max_delta = 0.0;
+            for (size_t j = 0; j < NumNodes; ++j) {
+                max_delta = std::max(max_delta, std::abs(next_x[j] - current_x[j]));
+            }
+
+            if (max_delta < CONVERGENCE_THRESH) {
+                x = next_x;
+                return; // Converged
+            }
+
+            if (max_delta > DAMPING_LIMIT) {
+                double scale = DAMPING_LIMIT / max_delta;
+                for (size_t j = 0; j < NumUnknowns; ++j) {
+                    current_x[j] += scale * (next_x[j] - current_x[j]);
+                }
+            } else {
+                current_x = next_x;
+            }
+        }
+        x = current_x; // Store result even if not fully converged
     }
 };
