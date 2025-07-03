@@ -4,15 +4,17 @@
 #include "Triode.h"
 #include <vector>
 
-// This class models the V2B gain stage and its full output load, including the
-// components that form the input network for the subsequent V2A stage.
+// This class models the V2B gain stage and its entire surrounding network.
 //
-// THIS IS A CORRECTED VERSION: It adds the full resistive load network
-// (R102, R101, R12, R103) to correctly model the AC load on the V2B plate,
-// ensuring a physically correct output voltage swing.
-class MixerAndV2B : public MNASolver<8, 2> { // System size increased to 8 nodes
+// THIS IS THE DEFINITIVE VERSION: It includes the full complex load on the V2B plate,
+// ensuring the DC operating point and AC swing are physically correct.
+//
+// Inputs: `in_lead`, `in_rhythm`.
+// Output: Voltage at node N023 (the grid of the final tube stage, V2A).
+//
+// The system has 8 unknown nodes and 2 voltage sources.
+class MixerAndV2B : public MNASolver<8, 2> {
 private:
-    // A linear passive filter for the rhythm path input.
     class RhythmPathProcessor : public MNASolver<1, 0> {
     private:
         static constexpr int GND = -1;
@@ -36,16 +38,17 @@ private:
     RhythmPathProcessor rhythmProcessor;
 
     static constexpr int GND = -1;
-    // CORRECTED: Added nodes N032 and N023 to model the full load
+    // CORRECTED: Added nodes for the full output load network
     enum Var {
         V_N002 = 0, // V2B Grid
         V_N036,     // V2B Cathode
         V_N021,     // V2B Plate
         V_P001,     // Output coupling intermediate node
-        V_N022,     // Output node (of this stage)
+        V_N022,     // Intermediate node in load network
         V_N006,     // Power Supply Node
-        V_N032,     // Load network intermediate node
-        V_N023      // Load network final node (grid of next stage)
+        V_N032,     // New node in the final load
+        V_N023      // New final output node (V2A Grid)
+        // V-source currents I_Vin and I_Vsupply are at indices 8 and 9
     };
 
     double R11, R12, R13, R16, R46, R101, R102, R103, R105;
@@ -59,18 +62,18 @@ private:
         stampVoltageSource(V_N002, GND, 0, input_sum);
         stampVoltageSource(V_N006, GND, 1, VC2);
 
-        // --- V2B Stage ---
-        stampResistor(V_N021, V_N006, R13);
-        stampResistor(V_N036, GND, R16);
-        stampResistor(V_N002, GND, R11);
+        // --- Mixer & V2B Components ---
+        stampResistor(V_N021, V_N006, R13); // Plate load
+        stampResistor(V_N036, GND, R16);    // Cathode resistor
+        stampResistor(V_N002, GND, R11);    // Grid-leak resistor
         stampCapacitor(V_N002, GND, C11, cap_z_state[0]);
 
-        // --- Output Load Network (Original) ---
-        stampCapacitor(V_P001, V_N021, C9, cap_z_state[1]);
+        // --- Full Output Load Network ---
+        stampCapacitor(V_P001, V_N021, C9, cap_z_state[1]); // Output coupling
         stampResistor(V_N022, V_P001, R105);
         stampResistor(V_N022, GND, R46);
 
-        // --- Full Load Network (Newly Added) ---
+        // CORRECTED: Add the newly included load resistors
         stampResistor(V_N022, V_N032, R102);
         stampResistor(V_N032, GND, R101);
         stampResistor(V_N023, V_N032, R12);
@@ -94,13 +97,12 @@ private:
 
 public:
     MixerAndV2B() : cap_z_state(2, 0.0) {
-        R11 = 680e3;  C11 = 47e-12;
-        R13 = 100e3;  R16 = 1.5e3;
-        C9 = 0.047e-6;
-        R105 = 47e3;  R46 = 47e3;
-        // Full load components
-        R102 = 150e3; R101 = 4.7e3;
-        R12 = 2.2e3;  R103 = 47e3;
+        // V2B and mixer components
+        R11 = 680e3; C11 = 47e-12; R13 = 100e3; R16 = 1.5e3;
+        // Output coupling components
+        C9 = 0.047e-6; R105 = 47e3; R46 = 47e3;
+        // Newly added load components
+        R102 = 150e3; R101 = 4.7e3; R12 = 2.2e3; R103 = 47e3;
     }
 
     void setup(double sr) {
@@ -131,7 +133,7 @@ public:
         updateCapacitorState(x[V_N002], 0, C11, cap_z_state[0]);
         updateCapacitorState(x[V_P001], x[V_N021], C9, cap_z_state[1]);
 
-        // The output of interest is still node N022
-        return x[V_N022];
+        // CORRECTED: Return the voltage at the final node N023
+        return x[V_N023];
     }
 };
