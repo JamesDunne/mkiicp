@@ -300,9 +300,9 @@ protected:
         }
 
         // --- Iteration Loop ---
-        const int MAX_ITER = 40; // Allow more iterations since convergence is slower
+        const int MAX_ITER = 25; // Allow more iterations since convergence is slower
         const double CONVERGENCE_THRESH = 1e-6;
-        const double DAMPING_LIMIT = 1.0;
+        const double DAMPING_LIMIT = 2.0;
 
         std::array<double, NumUnknowns> current_x = x;
         for (int i = 0; i < MAX_ITER; ++i) {
