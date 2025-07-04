@@ -20,6 +20,8 @@ int main(int argc, const char *argv[]) {
         std::cout << x << std::endl;
     }
 
+    converged = diverged = failed = 0;
+
 #if 0
     std::cout << x << std::endl;
     for (int i = 0; i < 10; i++) {
@@ -49,7 +51,8 @@ int main(int argc, const char *argv[]) {
     std::cout << min << " " << max << std::endl;
 
     Triode::printStats();
-    std::cout << converged << "/" << diverged << "/" << failed << std::endl;
+    std::cout << converged << "," << diverged << "," << failed << std::endl;
+    std::cout << ((double)diverged / (double)(diverged + converged) * 100.0) << "% diverged" << std::endl;
 
     return 0;
 }

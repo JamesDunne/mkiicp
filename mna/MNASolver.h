@@ -364,6 +364,7 @@ protected:
             // Decompose the matrix. If this fails, we can't continue.
             if (((i & 7) == 0) && !lu_decompose()) {
                 x.fill(0.0);
+                failed++;
                 return;
             }
 
@@ -379,6 +380,7 @@ protected:
 
             if (max_delta < CONVERGENCE_THRESH) {
                 x = next_x;
+                converged++;
                 return; // Converged
             }
 
@@ -392,6 +394,7 @@ protected:
             }
         }
 
+        diverged++;
         std::cerr << "diverged max_delta = " << max_delta << std::endl;
 
         x = current_x;
@@ -404,8 +407,11 @@ protected:
             isDirty = false;
         }
 
-        const int MAX_ITER = 50;
-        const double CONVERGENCE_THRESH = 1e-6;
+        const int MAX_ITER = 30;
+        // --- NEW: Define both relative and absolute tolerances ---
+        const double REL_TOL = 1e-6; // Relative tolerance
+        const double ABS_TOL = 1e-6; // Absolute tolerance (for values near zero)
+
         const double DAMPING_LIMIT = 1.0;
         const double STALL_THRESHOLD = 0.9;
 
@@ -438,43 +444,53 @@ protected:
             std::array<double, NumUnknowns> next_x;
             lu_solve(next_x);
 
-            // --- Step 3: Calculate update delta and check for stall/convergence ---
-            double norm = 0.0;
+            // --- Calculate norms for the new convergence check ---
+            double delta_norm = 0.0;
+            double x_norm = 0.0;
             std::array<double, NumUnknowns> delta_x;
             for (size_t j = 0; j < NumUnknowns; ++j) {
                 delta_x[j] = next_x[j] - current_x[j];
-                if (j < NumNodes) norm += delta_x[j] * delta_x[j];
+                // Only check convergence on voltage nodes for stability
+                if (j < NumNodes) {
+                    delta_norm += delta_x[j] * delta_x[j];
+                    x_norm += next_x[j] * next_x[j];
+                }
             }
-            norm = std::sqrt(norm);
+            delta_norm = std::sqrt(delta_norm);
+            x_norm = std::sqrt(x_norm);
 
-            if (norm < CONVERGENCE_THRESH) {
+            // --- THE ROBUST CONVERGENCE CHECK ---
+            if (delta_norm < (x_norm * REL_TOL + ABS_TOL)) {
                 x = next_x;
                 converged++;
                 return; // Converged!
             }
 
-            if (norm > last_norm * STALL_THRESHOLD && i > 1) {
+            if (delta_norm > last_norm * STALL_THRESHOLD && i > 1) {
                 recompute_jacobian = true;
             }
-            last_norm = norm;
+            last_norm = delta_norm;
 
-            // --- Step 4: Apply Dampened Update ---
+            // Apply Dampened Update
+            double scale = 1.0;
             max_delta_abs = 0.0;
             for(size_t j = 0; j < NumNodes; ++j) { max_delta_abs = std::max(max_delta_abs, std::abs(delta_x[j]));}
 
-            double scale = 1.0;
             if (max_delta_abs > DAMPING_LIMIT) {
                 scale = DAMPING_LIMIT / max_delta_abs;
-                just_dampened = true; // Set the flag for the next iteration!
+                just_dampened = true;
             }
-
             for (size_t j = 0; j < NumUnknowns; ++j) {
                 current_x[j] += scale * delta_x[j];
             }
         }
+
         diverged++;
-        std::cerr << "diverged max_delta = " << std::setw(11) << std::setprecision(6) << max_delta_abs
-            << ", norm = " << std::setw(11) << std::setprecision(6) << last_norm << std::endl;
+        std::cerr << "diverged max_delta = "
+            << std::setw(9) << std::setfill(' ') << std::fixed << std::setprecision(6) << max_delta_abs
+            << ", norm = "
+            << std::setw(9) << std::setfill(' ') << std::fixed << std::setprecision(6) << last_norm << std::endl;
+
         x = current_x;
     }
 
