@@ -403,7 +403,7 @@ protected:
             isDirty = false;
         }
 
-        const int MAX_ITER = 60;
+        const int MAX_ITER = 120;
         const double REL_TOL = 1e-6;
         const double ABS_TOL = 1e-9;
         const double DAMPING_LIMIT = 1.0;
