@@ -113,6 +113,17 @@ private:
         stampConductance(V_N019, V_N033, ts.g_ig);
     }
 
+    void stampNonLinear_b_only(const std::array<double, NumUnknowns>& current_x) override {
+        double v_p = current_x[V_N004], v_g = current_x[V_N019], v_c = current_x[V_N033];
+        Triode::State ts = Triode::calculate(v_p - v_c, v_g - v_c);
+
+        // Only stamp the b-vector parts
+        double i_p_lin = ts.ip - ts.g_p*(v_p-v_c) - ts.g_g*(v_g-v_c);
+        stampCurrentSource(V_N004, V_N033, i_p_lin);
+        double i_g_lin = ts.ig - ts.g_ig*(v_g-v_c);
+        stampCurrentSource(V_N019, V_N033, i_g_lin);
+    }
+
 public:
     V1A_ToneStack() : cap_z_state() { // Changed name from cap_hist
         R1 = 1e6; R2 = 1.5e3; R4 = 150e3; R5 = 100e3; R5A = 100e3;
@@ -129,7 +140,8 @@ public:
 
     double process(double in) {
         // solveNonlinear(in);
-        solveNonlinear_Simplified(in);
+        // solveNonlinear_Simplified(in);
+        solveNonlinear_Adaptive(in);
 
         updateCapacitorState(x[V_N033], 0, C1, cap_z_state[0]);
         updateCapacitorState(x[V_N033], 0, C2, cap_z_state[1]);

@@ -228,8 +228,29 @@ protected:
     }
 
     void lu_solve(std::array<double, NumUnknowns>& result) {
+        //lu_solve_residual(b, result);
         std::array<double, NumUnknowns> temp_b;
         for (size_t i = 0; i < NumUnknowns; ++i) temp_b[i] = b[pivot[i]];
+
+        for (size_t i = 0; i < NumUnknowns; ++i) {
+            result[i] = temp_b[i];
+            for (size_t j = 0; j < i; ++j) {
+                result[i] -= A_lu[i][j] * result[j];
+            }
+        }
+
+        for (int i = NumUnknowns - 1; i >= 0; --i) {
+            for (size_t j = i + 1; j < NumUnknowns; ++j) {
+                result[i] -= A_lu[i][j] * result[j];
+            }
+            result[i] /= A_lu[i][i];
+        }
+    }
+
+    // A slightly different lu_solve that takes the RHS vector as an argument
+    void lu_solve_residual(const std::array<double, NumUnknowns>& rhs, std::array<double, NumUnknowns>& result) {
+        std::array<double, NumUnknowns> temp_b;
+        for (size_t i = 0; i < NumUnknowns; ++i) { temp_b[i] = rhs[pivot[i]]; }
 
         for (size_t i = 0; i < NumUnknowns; ++i) {
             result[i] = temp_b[i];
@@ -374,5 +395,89 @@ protected:
         }
 
         x = current_x;
+    }
+
+    void solveNonlinear_Adaptive(double in) {
+        if (isDirty) {
+            A_linear.fill({}); b_linear.fill({});
+            stampLinear();
+            isDirty = false;
+        }
+
+        const int MAX_ITER = 30;
+        const double CONVERGENCE_THRESH = 1e-6;
+        const double DAMPING_LIMIT = 1.0;
+        const double STALL_THRESHOLD = 0.9; // If error shrinks by less than 10%, we're stalling
+
+        std::array<double, NumUnknowns> current_x = x;
+        double last_norm = 1e9;
+        bool recompute_jacobian = true; // Always compute on the first iteration of a sample
+
+        for (int i = 0; i < MAX_ITER; ++i) {
+            // --- Step 1: Adaptive Jacobian Update ---
+            if (recompute_jacobian) {
+                // Build the full Jacobian matrix A using the current guess
+                A = A_linear;
+                stampDynamic(in);
+                stampNonLinear(current_x);
+
+                if (!lu_decompose()) {
+                    x.fill(0.0);
+                    return;
+                }
+                recompute_jacobian = false; // Reset the flag
+            }
+
+            // --- Step 2: Solve the system using the current LU factorization ---
+            // Build the dynamic right-hand-side 'b' vector.
+            // Note: We don't need to rebuild A here, only b.
+            b = b_linear;
+            stampDynamic(in);
+            stampNonLinear_b_only(current_x); // A new helper to only stamp non-linear sources
+
+            std::array<double, NumUnknowns> next_x;
+            lu_solve(next_x);
+
+            // --- Step 3: Calculate update delta and check for stall/convergence ---
+            double norm = 0.0;
+            for (size_t j = 0; j < NumNodes; ++j) {
+                double delta = next_x[j] - current_x[j];
+                norm += delta * delta;
+            }
+            norm = std::sqrt(norm);
+
+            if (norm < CONVERGENCE_THRESH) {
+                x = next_x;
+                return; // Converged!
+            }
+
+            // Stall detection
+            if (norm > last_norm * STALL_THRESHOLD && i > 0) {
+                recompute_jacobian = true;
+            }
+            last_norm = norm;
+
+            // --- Step 4: Apply Dampened Update ---
+            current_x = next_x; // Use the full step and let dampening handle overshoots in the *next* iter
+                                // OR apply dampening directly for more stability:
+            double max_delta = 0.0;
+            for(size_t j=0; j<NumNodes; ++j) { max_delta = std::max(max_delta, std::abs(next_x[j] - current_x[j])); }
+
+            if (max_delta > DAMPING_LIMIT) {
+                double scale = DAMPING_LIMIT / max_delta;
+                for (size_t j = 0; j < NumUnknowns; ++j) {
+                    current_x[j] = x[j] + scale * (next_x[j] - x[j]);
+                }
+            } else {
+                 current_x = next_x;
+            }
+        }
+        x = current_x;
+    }
+
+    virtual void stampNonLinear_b_only(const std::array<double, NumUnknowns>& current_x) {
+        // Default implementation just calls the full stampNonLinear.
+        // Derived classes can provide a more optimized version.
+        stampNonLinear(current_x);
     }
 };
