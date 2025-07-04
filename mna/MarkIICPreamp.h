@@ -49,14 +49,14 @@ public:
         // return out_s1;
 
         double out_s2 = v1b.process(out_s1);
-        return out_s2;
+        // return out_s2;
 
         double out_s3 = v1bCoupling.process(out_s2); // out is N001
         // return out_s3;
 
         double lead_path_in = out_s3;
         double out_s4 = v3b.process(lead_path_in);
-        // return out_s4;
+        return out_s4;
 
         double out_s5 = v4a.process(out_s4);
         // return out_s5;

@@ -107,6 +107,21 @@ private:
         stampConductance(V_N029, V_N035, ts.g_ig);
     }
 
+    void stampNonLinear_b_only(const std::array<double, NumUnknowns>& current_x) override {
+        // XV3B: Plate=N017, Grid=N029, Cathode=N035
+        double v_p = current_x[V_N017];
+        double v_g = current_x[V_N029];
+        double v_c = current_x[V_N035];
+
+        Triode::State ts = Triode::calculate(v_p - v_c, v_g - v_c);
+
+        double i_p_lin = ts.ip - ts.g_p * (v_p - v_c) - ts.g_g * (v_g - v_c);
+        stampCurrentSource(V_N017, V_N035, i_p_lin);
+
+        double i_g_lin = ts.ig - ts.g_ig * (v_g - v_c);
+        stampCurrentSource(V_N029, V_N035, i_g_lin);
+    }
+
 public:
     V3B_and_Coupling() : cap_z_state(4, 0.0) {
         // V3B components
@@ -123,7 +138,8 @@ public:
 
     double process(double in) {
         // solveNonlinear(in);
-        solveNonlinear_Simplified(in);
+        // solveNonlinear_Simplified(in);
+        solveNonlinear_Adaptive(in);
 
         updateCapacitorState(x[V_N035], 0, C23, cap_z_state[0]);
         updateCapacitorState(x[V_N035], x[V_N029], C22, cap_z_state[1]);
