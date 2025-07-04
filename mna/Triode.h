@@ -100,11 +100,11 @@ private:
 
         // --- Grid Current Calculation ---
         if (v_g > 0) {
-            s.ig = IS * (exp(v_g / VT) - 1.0);
-            s.g_ig = (IS / VT) * exp(v_g / VT);
+            // Simple model for the diode + RGI in series.
+            double Vd = v_g; // The voltage across the series pair
+            s.ig = Vd / RGI; // Ohm's law approximation
+            s.g_ig = 1.0 / RGI;
         }
-        s.ig += v_g / RGI;
-        s.g_ig += 1.0 / RGI;
 
         // Clamp conductances to prevent instability
         s.g_p = std::max(1e-12, s.g_p);
