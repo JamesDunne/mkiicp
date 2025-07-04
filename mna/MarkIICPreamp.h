@@ -11,7 +11,7 @@ private:
     // This is a conceptual layout. The actual segments would be implemented
     // following the `V1A_ToneStack` example.
     V1A_ToneStack v1aToneStack;
-    PostToneDriver leadAndMixer;
+    LeadAndMixerStage leadAndMixer;
     V2B_Stage v2b;
     V2A_OutputStage v2aOutput;
 

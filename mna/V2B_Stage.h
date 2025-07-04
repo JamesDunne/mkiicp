@@ -52,19 +52,16 @@ private:
     }
 
     void stampNonLinear(const std::array<double, NumUnknowns>& x) override {
-        Triode::State ts = Triode::calculate(x[V_N021]-x[V_N036], x[V_N002]-x[V_N036]);
+        double v_p = x[V_N021]-x[V_N036];
+        double v_g = x[V_N002]-x[V_N036];
+        Triode::State ts = Triode::calculate(v_p, v_g);
         stampConductance(V_N021, V_N036, ts.g_p);
         A[V_N021][V_N002] += ts.g_g; A[V_N021][V_N036] -= ts.g_g;
         A[V_N036][V_N002] -= ts.g_g; A[V_N036][V_N036] += ts.g_g;
         stampConductance(V_N002, V_N036, ts.g_ig);
-        stampNonLinear_b_only(x);
-    }
-
-    void stampNonLinear_b_only(const std::array<double, NumUnknowns>& x) override {
-        Triode::State ts = Triode::calculate(x[V_N021]-x[V_N036], x[V_N002]-x[V_N036]);
-        double i_p_lin = ts.ip - ts.g_p*(x[V_N021]-x[V_N036]) - ts.g_g*(x[V_N002]-x[V_N036]);
+        double i_p_lin = ts.ip - ts.g_p*v_p - ts.g_g*v_g;
         stampCurrentSource(V_N021, V_N036, i_p_lin);
-        double i_g_lin = ts.ig - ts.g_ig*(x[V_N002]-x[V_N036]);
+        double i_g_lin = ts.ig - ts.g_ig*v_g;
         stampCurrentSource(V_N002, V_N036, i_g_lin);
     }
 

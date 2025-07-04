@@ -281,7 +281,6 @@ protected:
 
     void setDirty() { isDirty = true; }
 
-    // --- NEW: Generic Non-Linear Solver ---
     void solveNonlinear(double in) {
         if (isDirty) {
             A_linear.fill({});
@@ -330,70 +329,6 @@ protected:
             }
         }
         x = current_x; // Store result even if not fully converged
-    }
-
-    // --- NEW: Simplified Newton Method for High Performance ---
-    void solveNonlinear_Simplified(double in) {
-        if (isDirty) {
-            A_linear.fill({});
-            b_linear.fill({});
-            stampLinear();
-            isDirty = false;
-        }
-
-        // --- Iteration Loop ---
-        const int MAX_ITER = 40; // Allow more iterations since convergence is slower
-        const double CONVERGENCE_THRESH = 1e-6;
-        const double DAMPING_LIMIT = 1.0;
-
-        int i;
-        double max_delta = 0.0;
-        std::array<double, NumUnknowns> current_x = x;
-        for (i = 0; i < MAX_ITER; ++i) {
-            // Re-build the right-hand side 'b' and the full matrix 'A' at each step.
-            // This is still much faster than re-decomposing.
-            A = A_linear;
-            b = b_linear;
-            stampDynamic(in);
-            stampNonLinear(current_x);
-
-            // Decompose the matrix. If this fails, we can't continue.
-            if (((i & 7) == 0) && !lu_decompose()) {
-                x.fill(0.0);
-                failed++;
-                return;
-            }
-
-            // Solve using the PRE-CALCULATED LU factorization.
-            std::array<double, NumUnknowns> next_x;
-            lu_solve(next_x);
-
-            // --- Dampening and Convergence Check (unchanged) ---
-            max_delta = 0.0;
-            for (size_t j = 0; j < NumNodes; ++j) {
-                max_delta = std::max(max_delta, std::abs(next_x[j] - current_x[j]));
-            }
-
-            if (max_delta < CONVERGENCE_THRESH) {
-                x = next_x;
-                converged++;
-                return; // Converged
-            }
-
-            if (max_delta > DAMPING_LIMIT) {
-                double scale = DAMPING_LIMIT / max_delta;
-                for (size_t j = 0; j < NumUnknowns; ++j) {
-                    current_x[j] += scale * (next_x[j] - current_x[j]);
-                }
-            } else {
-                current_x = next_x;
-            }
-        }
-
-        diverged++;
-        std::cerr << "diverged max_delta = " << max_delta << std::endl;
-
-        x = current_x;
     }
 
     void solveNonlinear_Adaptive(double in) {
@@ -471,11 +406,5 @@ protected:
         }
         diverged++;
         x = current_x;
-    }
-
-    virtual void stampNonLinear_b_only(const std::array<double, NumUnknowns>& current_x) {
-        // Default implementation just calls the full stampNonLinear.
-        // Derived classes can provide a more optimized version.
-        stampNonLinear(current_x);
     }
 };

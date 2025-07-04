@@ -10,7 +10,6 @@ add_executable(mna main.cpp
         MNASolver.h
         MarkIICPreamp.h
         V1A_ToneStack.h
-        V1B_Stage.h
         LeadAndMixerStage.h
         V2B_Stage.h
         V2A_OutputStage.h)

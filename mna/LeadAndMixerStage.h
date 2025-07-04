@@ -10,7 +10,7 @@
 // THIS IS THE FINAL CORRECTED VERSION: It meticulously implements the V1B output coupling,
 // which fixes the critical DC offset and gain-staging bugs. This should finally deliver
 // the correct high-gain tone and response.
-class PostToneDriver : public MNASolver<17, 3> {
+class LeadAndMixerStage : public MNASolver<17, 3> {
 private:
     static constexpr int GND = -1;
     enum Var {
@@ -104,42 +104,42 @@ private:
     }
 
     void stampNonLinear(const std::array<double, NumUnknowns>& x) override {
-        // V1B
+        // Calculate the state of each triode ONCE.
         Triode::State ts1b = Triode::calculate(x[V_N009]-x[V_N027], x[V_N020]-x[V_N027]);
+        Triode::State ts3b = Triode::calculate(x[V_N017]-x[V_N035], x[V_N029]-x[V_N035]);
+        Triode::State ts4a = Triode::calculate(x[V_N025]-x[V_N034], x[V_N030]-x[V_N034]);
+
+        // --- Stamp V1B ---
+        // A Matrix (Conductances)
         stampConductance(V_N009, V_N027, ts1b.g_p);
         A[V_N009][V_N020]+=ts1b.g_g; A[V_N009][V_N027]-=ts1b.g_g;
         A[V_N027][V_N020]-=ts1b.g_g; A[V_N027][V_N027]+=ts1b.g_g;
         stampConductance(V_N020, V_N027, ts1b.g_ig);
-        // V3B
-        Triode::State ts3b = Triode::calculate(x[V_N017]-x[V_N035], x[V_N029]-x[V_N035]);
-        stampConductance(V_N017, V_N035, ts3b.g_p);
-        A[V_N017][V_N029]+=ts3b.g_g; A[V_N017][V_N035]-=ts3b.g_g;
-        A[V_N035][V_N029]-=ts3b.g_g; A[V_N035][V_N035]+=ts3b.g_g;
-        stampConductance(V_N029, V_N035, ts3b.g_ig);
-        // V4A
-        Triode::State ts4a = Triode::calculate(x[V_N025]-x[V_N034], x[V_N030]-x[V_N034]);
-        stampConductance(V_N025, V_N034, ts4a.g_p);
-        A[V_N025][V_N030]+=ts4a.g_g; A[V_N025][V_N034]-=ts4a.g_g;
-        A[V_N034][V_N030]-=ts4a.g_g; A[V_N034][V_N034]+=ts4a.g_g;
-        stampConductance(V_N030, V_N034, ts4a.g_ig);
-        stampNonLinear_b_only(x);
-    }
-
-    void stampNonLinear_b_only(const std::array<double, NumUnknowns>& x) override {
-        // V1B
-        Triode::State ts1b = Triode::calculate(x[V_N009]-x[V_N027], x[V_N020]-x[V_N027]);
+        // b Vector (Linearized Current Sources)
         double i_p1b_lin=ts1b.ip-ts1b.g_p*(x[V_N009]-x[V_N027])-ts1b.g_g*(x[V_N020]-x[V_N027]);
         stampCurrentSource(V_N009, V_N027, i_p1b_lin);
         double i_g1b_lin=ts1b.ig-ts1b.g_ig*(x[V_N020]-x[V_N027]);
         stampCurrentSource(V_N020, V_N027, i_g1b_lin);
-        // V3B
-        Triode::State ts3b = Triode::calculate(x[V_N017]-x[V_N035], x[V_N029]-x[V_N035]);
+
+        // --- Stamp V3B ---
+        // A Matrix
+        stampConductance(V_N017, V_N035, ts3b.g_p);
+        A[V_N017][V_N029]+=ts3b.g_g; A[V_N017][V_N035]-=ts3b.g_g;
+        A[V_N035][V_N029]-=ts3b.g_g; A[V_N035][V_N035]+=ts3b.g_g;
+        stampConductance(V_N029, V_N035, ts3b.g_ig);
+        // b Vector
         double i_p3b_lin=ts3b.ip-ts3b.g_p*(x[V_N017]-x[V_N035])-ts3b.g_g*(x[V_N029]-x[V_N035]);
         stampCurrentSource(V_N017, V_N035, i_p3b_lin);
         double i_g3b_lin=ts3b.ig-ts3b.g_ig*(x[V_N029]-x[V_N035]);
         stampCurrentSource(V_N029, V_N035, i_g3b_lin);
-        // V4A
-        Triode::State ts4a = Triode::calculate(x[V_N025]-x[V_N034], x[V_N030]-x[V_N034]);
+
+        // --- Stamp V4A ---
+        // A Matrix
+        stampConductance(V_N025, V_N034, ts4a.g_p);
+        A[V_N025][V_N030]+=ts4a.g_g; A[V_N025][V_N034]-=ts4a.g_g;
+        A[V_N034][V_N030]-=ts4a.g_g; A[V_N034][V_N034]+=ts4a.g_g;
+        stampConductance(V_N030, V_N034, ts4a.g_ig);
+        // b Vector
         double i_p4a_lin=ts4a.ip-ts4a.g_p*(x[V_N025]-x[V_N034])-ts4a.g_g*(x[V_N030]-x[V_N034]);
         stampCurrentSource(V_N025, V_N034, i_p4a_lin);
         double i_g4a_lin=ts4a.ig-ts4a.g_ig*(x[V_N030]-x[V_N034]);
@@ -147,7 +147,7 @@ private:
     }
 
 public:
-    PostToneDriver() : cap_z_state(13, 0.0) {
+    LeadAndMixerStage() : cap_z_state(13, 0.0) {
         R7=1.5e3; R8=100e3; R9=100e3; R10=3.3e6; R11=680e3; R21=680e3; R22=475e3;
         R23=1.5e3; R24=68e3; R25=270e3; R26=82e3; R27=274e3; R30=3.3e3; R31=220e3; R32=100e3;
         C7=0.1e-6; C10=20e-12; C11=47e-12; C13=22e-6; C21=0.02e-6; C22=120e-12; C23=2.2e-6;
