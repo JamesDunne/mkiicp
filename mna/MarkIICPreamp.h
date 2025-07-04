@@ -1,10 +1,9 @@
 #pragma once
 
-#include "V2B_Stage.h"
 #include "V1A_ToneStack.h"
-#include "V1B_Stage.h"
-#include "V2A_OutputStage.h"
 #include "LeadAndMixerStage.h"
+#include "V2B_Stage.h"
+#include "V2A_OutputStage.h"
 
 class MarkIICPreamp {
 private:
@@ -12,7 +11,7 @@ private:
     // This is a conceptual layout. The actual segments would be implemented
     // following the `V1A_ToneStack` example.
     V1A_ToneStack v1aToneStack;
-    V1B_and_LeadMixer leadAndMixer;
+    PostToneDriver leadAndMixer;
     V2B_Stage v2b;
     V2A_OutputStage v2aOutput;
 
@@ -41,10 +40,10 @@ public:
         // return out_v1a;
 
         double out_lead = leadAndMixer.process(out_v1a);
-        return out_lead;
+        // return out_lead;
 
         double out_v2b = v2b.process(out_lead);
-        return out_v2b;
+        // return out_v2b;
 
         // Final V2A output stage:
         double out_master = v2aOutput.process(out_v2b);

@@ -403,7 +403,7 @@ protected:
             isDirty = false;
         }
 
-        const int MAX_ITER = 30;
+        const int MAX_ITER = 60;
         const double REL_TOL = 1e-6;
         const double ABS_TOL = 1e-9;
         const double DAMPING_LIMIT = 1.0;
@@ -419,7 +419,7 @@ protected:
         for (int i = 0; i < MAX_ITER; ++i) {
             // --- Step 1: Proactive & Reactive Jacobian Update ---
             // Recompute if: first run, stalled, just dampened, OR at the periodic interval.
-            if (recompute_jacobian || just_dampened || (i > 0 && (i % JACOBIAN_REFRESH_INTERVAL == 0))) {
+            if (recompute_jacobian || just_dampened || (i > 0 && ((i % JACOBIAN_REFRESH_INTERVAL) == 0))) {
                 A = A_linear;
                 b = b_linear;
                 stampDynamic(in);

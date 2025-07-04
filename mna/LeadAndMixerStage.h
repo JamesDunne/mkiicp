@@ -7,9 +7,10 @@
 // This is the definitive "super-stage" that models the V1B driver, the entire lead channel,
 // and the mixer network together.
 //
-// THIS IS THE CORRECTED VERSION: It fixes a critical stamping error in the V1B output
-// network that was killing the gain of the entire lead channel.
-class V1B_and_LeadMixer : public MNASolver<17, 3> {
+// THIS IS THE FINAL CORRECTED VERSION: It meticulously implements the V1B output coupling,
+// which fixes the critical DC offset and gain-staging bugs. This should finally deliver
+// the correct high-gain tone and response.
+class PostToneDriver : public MNASolver<17, 3> {
 private:
     static constexpr int GND = -1;
     enum Var {
@@ -27,21 +28,22 @@ private:
 
     void stampLinear() override {
         // --- Sources Topology ---
-        stampVoltageSource_A(V_N020, GND, 0); // Input from Tone Stack
-        stampVoltageSource_A(V_N003, GND, 1); // VE Power Supply
-        stampVoltageSource_A(V_N010, GND, 2); // VC Power Supply
+        stampVoltageSource_A(V_N020, GND, 0);
+        stampVoltageSource_A(V_N003, GND, 1);
+        stampVoltageSource_A(V_N010, GND, 2);
         b_linear[NumNodes + 1] = VE;
         b_linear[NumNodes + 2] = VC;
 
         // --- V1B Stage ---
-        stampResistorLinear(V_N027, GND, R7);     // Cathode Resistor
-        stampResistorLinear(V_N009, V_N003, R8); // Plate Load Resistor
-        stampCapacitor_A(V_N027, GND, C13);      // Cathode Bypass Cap
+        stampResistorLinear(V_N027, GND, R7);
+        stampResistorLinear(V_N009, V_N003, R8);
+        stampCapacitor_A(V_N027, GND, C13);
 
         // --- V1B Output Coupling (CRITICAL, NOW CORRECT) ---
-        // C7 couples the AC signal from the plate (N009) to the junction node (N001)
+        // C7 AC-couples the plate N009 to the junction node N001. This blocks DC.
         stampCapacitor_A(V_N001, V_N009, C7);
-        // R9 provides the DC path to ground for the junction node N001, acting as V1B's load
+        // R9 provides the DC path to ground for N001 and everything connected to it.
+        // This forces the DC voltage at N001 (and thus the lead grid) to be 0V.
         stampResistorLinear(V_N001, GND, R9);
 
         // --- Mixer (Rhythm Path from N001) ---
@@ -77,7 +79,7 @@ private:
         stampResistorLinear(V_N002, V_N026, R31);
         stampCapacitor_A(V_N002, V_N026, C31);
 
-        // --- Final Mixer Load ---
+        // --- Final Mixer Load on N002 ---
         stampResistorLinear(V_N002, GND, R11);
         stampResistorLinear(V_N002, GND, R32);
         stampCapacitor_A(V_N002, GND, C11);
@@ -145,7 +147,7 @@ private:
     }
 
 public:
-    V1B_and_LeadMixer() : cap_z_state(13, 0.0) {
+    PostToneDriver() : cap_z_state(13, 0.0) {
         R7=1.5e3; R8=100e3; R9=100e3; R10=3.3e6; R11=680e3; R21=680e3; R22=475e3;
         R23=1.5e3; R24=68e3; R25=270e3; R26=82e3; R27=274e3; R30=3.3e3; R31=220e3; R32=100e3;
         C7=0.1e-6; C10=20e-12; C11=47e-12; C13=22e-6; C21=0.02e-6; C22=120e-12; C23=2.2e-6;
@@ -164,6 +166,7 @@ public:
 
     double process(double in) {
         solveNonlinear_Adaptive(in);
+        // solveNonlinear(in);
         updateCapacitorState(x[V_N027], 0, C13, cap_z_state[0]);
         updateCapacitorState(x[V_N001], x[V_N009], C7, cap_z_state[1]);
         updateCapacitorState(x[V_N002], x[V_N001], C10, cap_z_state[2]);

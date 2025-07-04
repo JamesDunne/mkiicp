@@ -17,7 +17,7 @@ int main(int argc, const char *argv[]) {
     double x = 0.0;
     for (int i = 0; i < 100000; i++) {
         x = preamp.processSample(0.0);
-        std::cout << x << std::endl;
+        // std::cout << x << std::endl;
     }
 
     converged = diverged = failed = 0;
@@ -40,6 +40,7 @@ int main(int argc, const char *argv[]) {
             double out = preamp.processSample(sample);
             if (out > max) max = out;
             if (out < min) min = out;
+            // std::cout << std::fixed << std::setprecision(6) << out << std::endl;
             return out / 410.0;
         }
     );
