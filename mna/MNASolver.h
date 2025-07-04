@@ -390,9 +390,7 @@ protected:
             }
         }
 
-        if (i == MAX_ITER) {
-            std::cerr << "max_delta = " << max_delta << std::endl;
-        }
+        std::cerr << "diverged max_delta = " << max_delta << std::endl;
 
         x = current_x;
     }
@@ -472,6 +470,7 @@ protected:
                  current_x = next_x;
             }
         }
+        std::cerr << "diverged" << std::endl;
         x = current_x;
     }
 

@@ -49,7 +49,7 @@ public:
         // return out_s1;
 
         double out_s2 = v1b.process(out_s1);
-        // return out_s2;
+        return out_s2;
 
         double out_s3 = v1bCoupling.process(out_s2); // out is N001
         // return out_s3;

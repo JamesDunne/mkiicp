@@ -17,6 +17,7 @@ int main(int argc, const char *argv[]) {
     double x = 0.0;
     for (int i = 0; i < 100000; i++) {
         x = preamp.processSample(0.0);
+        std::cout << x << std::endl;
     }
 
 #if 0

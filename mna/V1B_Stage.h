@@ -109,6 +109,17 @@ private:
         stampConductance(V_N020, V_N027, ts.g_ig);
     }
 
+    void stampNonLinear_b_only(const std::array<double, NumUnknowns>& current_x) override {
+        double v_p = current_x[V_N009], v_g = current_x[V_N020], v_c = current_x[V_N027];
+        Triode::State ts = Triode::calculate(v_p - v_c, v_g - v_c);
+
+        // Only stamp the b-vector parts
+        double i_p_lin = ts.ip - ts.g_p * (v_p - v_c) - ts.g_g * (v_g - v_c);
+        stampCurrentSource(V_N009, V_N027, i_p_lin);
+        double i_g_lin = ts.ig - ts.g_ig * (v_g - v_c);
+        stampCurrentSource(V_N020, V_N027, i_g_lin);
+    }
+
 public:
     V1B_Stage() : cap_z_state(2, 0.0) {
         // Set fixed component values from SPICE netlist
@@ -123,7 +134,8 @@ public:
 
     double process(double in) {
         // solveNonlinear(in);
-        solveNonlinear_Simplified(in);
+        // solveNonlinear_Simplified(in);
+        solveNonlinear_Adaptive(in);
 
         // Update capacitor states for the next time step
         updateCapacitorState(x[V_N027], 0, C13, cap_z_state[0]);
