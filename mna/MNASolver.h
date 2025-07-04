@@ -249,23 +249,19 @@ protected:
         }
     }
 
-    // A slightly different lu_solve that takes the RHS vector as an argument
+    // This helper now takes the residual 'f(x)' and calculates 'dx = J_inv * f(x)'
     void lu_solve_residual(const std::array<double, NumUnknowns>& rhs, std::array<double, NumUnknowns>& result) {
         std::array<double, NumUnknowns> temp_b;
         for (size_t i = 0; i < NumUnknowns; ++i) { temp_b[i] = rhs[pivot[i]]; }
-
         for (size_t i = 0; i < NumUnknowns; ++i) {
-            result[i] = temp_b[i];
-            for (size_t j = 0; j < i; ++j) {
-                result[i] -= A_lu[i][j] * result[j];
-            }
+            double sum = temp_b[i];
+            for (size_t j = 0; j < i; ++j) { sum -= A_lu[i][j] * result[j]; }
+            result[i] = sum;
         }
-
         for (int i = NumUnknowns - 1; i >= 0; --i) {
-            for (size_t j = i + 1; j < NumUnknowns; ++j) {
-                result[i] -= A_lu[i][j] * result[j];
-            }
-            result[i] /= A_lu[i][i];
+            double sum = result[i];
+            for (size_t j = i + 1; j < NumUnknowns; ++j) { sum -= A_lu[i][j] * result[j]; }
+            result[i] = sum / A_lu[i][i];
         }
     }
 
@@ -408,60 +404,52 @@ protected:
         }
 
         const int MAX_ITER = 30;
-        // --- NEW: Define both relative and absolute tolerances ---
-        const double REL_TOL = 1e-6; // Relative tolerance
-        const double ABS_TOL = 1e-6; // Absolute tolerance (for values near zero)
-
+        const double REL_TOL = 1e-6;
+        const double ABS_TOL = 1e-9;
         const double DAMPING_LIMIT = 1.0;
         const double STALL_THRESHOLD = 0.9;
+        // NEW: Proactively refresh the Jacobian every N iterations
+        const int JACOBIAN_REFRESH_INTERVAL = 5;
 
         std::array<double, NumUnknowns> current_x = x;
         double last_norm = 1e9;
-        bool recompute_jacobian = true; // Always true for the first iteration
-        bool just_dampened = false;     // NEW: Flag to track if the last step was dampened
+        bool recompute_jacobian = true;
+        bool just_dampened = false;
 
-        double max_delta_abs = 0.0;
         for (int i = 0; i < MAX_ITER; ++i) {
-            // --- Step 1: Adaptive Jacobian Update ---
-            // Recompute if it's the first run, if we stalled, OR if we just took a big, dampened step.
-            if (recompute_jacobian || just_dampened) {
+            // --- Step 1: Proactive & Reactive Jacobian Update ---
+            // Recompute if: first run, stalled, just dampened, OR at the periodic interval.
+            if (recompute_jacobian || just_dampened || (i > 0 && (i % JACOBIAN_REFRESH_INTERVAL == 0))) {
                 A = A_linear;
+                b = b_linear;
                 stampDynamic(in);
                 stampNonLinear(current_x);
                 if (!lu_decompose()) {
-                    x.fill(0.0);
                     failed++;
+                    x.fill(0.0);
                     return;
                 }
                 recompute_jacobian = false;
                 just_dampened = false;
             }
 
-            // --- Step 2: Solve the system ---
-            b = b_linear;
-            stampDynamic(in);
-            stampNonLinear_b_only(current_x);
+            // --- Step 2: Solve A*x_next = b ---
+            // Always solve for the absolute next state using the current LU factorization.
             std::array<double, NumUnknowns> next_x;
             lu_solve(next_x);
 
-            // --- Calculate norms for the new convergence check ---
-            double delta_norm = 0.0;
-            double x_norm = 0.0;
-            std::array<double, NumUnknowns> delta_x;
-            for (size_t j = 0; j < NumUnknowns; ++j) {
-                delta_x[j] = next_x[j] - current_x[j];
-                // Only check convergence on voltage nodes for stability
-                if (j < NumNodes) {
-                    delta_norm += delta_x[j] * delta_x[j];
-                    x_norm += next_x[j] * next_x[j];
-                }
+            // --- Step 3: Check for Convergence ---
+            double delta_norm = 0.0, x_norm = 0.0;
+            for (size_t j = 0; j < NumNodes; ++j) {
+                double delta = next_x[j] - current_x[j];
+                delta_norm += delta * delta;
+                x_norm += next_x[j] * next_x[j];
             }
             delta_norm = std::sqrt(delta_norm);
             x_norm = std::sqrt(x_norm);
 
-            // --- THE ROBUST CONVERGENCE CHECK ---
             if (delta_norm < (x_norm * REL_TOL + ABS_TOL)) {
-                x = next_x;
+                x = current_x;
                 converged++;
                 return; // Converged!
             }
@@ -471,26 +459,17 @@ protected:
             }
             last_norm = delta_norm;
 
-            // Apply Dampened Update
+            // --- Step 5: Apply Dampened Update x_new = x - scale*dx ---
             double scale = 1.0;
-            max_delta_abs = 0.0;
-            for(size_t j = 0; j < NumNodes; ++j) { max_delta_abs = std::max(max_delta_abs, std::abs(delta_x[j]));}
-
-            if (max_delta_abs > DAMPING_LIMIT) {
-                scale = DAMPING_LIMIT / max_delta_abs;
+            if (delta_norm > DAMPING_LIMIT) {
+                scale = DAMPING_LIMIT / delta_norm;
                 just_dampened = true;
             }
             for (size_t j = 0; j < NumUnknowns; ++j) {
-                current_x[j] += scale * delta_x[j];
+                current_x[j] += scale * (next_x[j] - current_x[j]);
             }
         }
-
         diverged++;
-        std::cerr << "diverged max_delta = "
-            << std::setw(9) << std::setfill(' ') << std::fixed << std::setprecision(6) << max_delta_abs
-            << ", norm = "
-            << std::setw(9) << std::setfill(' ') << std::fixed << std::setprecision(6) << last_norm << std::endl;
-
         x = current_x;
     }
 
