@@ -12,8 +12,7 @@ private:
     // This is a conceptual layout. The actual segments would be implemented
     // following the `V1A_ToneStack` example.
     V1A_ToneStack v1aToneStack;
-    V1B_Stage v1b;
-    LeadAndMixerStage leadAndMixer;
+    V1B_and_LeadMixer leadAndMixer;
     V2B_Stage v2b;
     V2A_OutputStage v2aOutput;
 
@@ -24,7 +23,6 @@ public:
 
     void setup(double sampleRate) {
         v1aToneStack.setup(sampleRate);
-        v1b.setup(sampleRate);
         leadAndMixer.setup(sampleRate);
         v2b.setup(sampleRate);
         v2aOutput.setup(sampleRate);
@@ -42,14 +40,11 @@ public:
         double out_v1a = v1aToneStack.process(in);
         // return out_v1a;
 
-        double out_v1b = v1b.process(out_v1a);
-        // return out_v1b;
-
-        double out_lead = leadAndMixer.process(out_v1b);
+        double out_lead = leadAndMixer.process(out_v1a);
         return out_lead;
 
         double out_v2b = v2b.process(out_lead);
-        // return out_v2b;
+        return out_v2b;
 
         // Final V2A output stage:
         double out_master = v2aOutput.process(out_v2b);

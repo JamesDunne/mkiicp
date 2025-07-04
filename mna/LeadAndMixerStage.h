@@ -4,96 +4,110 @@
 #include "Triode.h"
 #include <vector>
 
-// This "super-stage" models the entire lead channel and mixer network together.
-// It combines the lead drive pot, V3B, V4A, and the mixer components into a
-// single, highly-accurate MNA system. This solves impedance, loading, and
-// divergence issues caused by splitting them apart.
+// This is the definitive "super-stage" that models the V1B driver, the entire lead channel,
+// and the mixer network together.
 //
-// Input:  Voltage from V1B stage (which is also the rhythm channel input).
-// Output: Voltage at the mixer output / V2B grid (node N002).
-//
-// Replaces: V3B_and_IO_Coupling and parts of the old MixerAndV2B.
-// The system has 13 unknown nodes and 2 voltage sources.
-class LeadAndMixerStage : public MNASolver<13, 2> {
+// THIS IS THE CORRECTED VERSION: It fixes a critical stamping error in the V1B output
+// network that was killing the gain of the entire lead channel.
+class V1B_and_LeadMixer : public MNASolver<17, 3> {
 private:
     static constexpr int GND = -1;
     enum Var {
-        V_N001 = 0, // Input from V1B / Rhythm Channel
-        V_N011,     // Lead path after C21
-        V_N024,     // Lead pot top
-        V_N029,     // V3B Grid
-        V_N017,     // V3B Plate
-        V_N035,     // V3B Cathode
-        V_N010,     // Power Supply Node (VC)
-        V_N018,     // Coupling between V3B and V4A
-        V_N030,     // V4A Grid
-        V_N025,     // V4A Plate
-        V_N034,     // V4A Cathode
-        V_N026,     // Coupling between V4A and Mixer
-        V_N002      // Final Output / Mixer Node
-        // V-sources at indices 13 and 14
+        V_N020 = 0, V_N009, V_N027, V_N003, V_N001, V_N011, V_N024, V_N029,
+        V_N017, V_N035, V_N010, V_N018, V_N030, V_N025, V_N034, V_N026, V_N002
     };
 
-    // Component values
-    double R10, R11, R21, R22, R23, R24, R25, R26, R27, R30, R31, R32;
+    double R7,R8,R9,R10,R11,R21,R22,R23,R24,R25,R26,R27,R30,R31,R32;
     double RA_LEAD_DRIVE, RC_LEAD_DRIVE;
-    double C10, C11, C21, C22, C23, C24, C25, C29, C30, C31, C32;
+    double C7,C10,C11,C13,C21,C22,C23,C24,C25,C29,C30,C31,C32;
 
     std::vector<double> cap_z_state;
+    const double VE = 405.0;
     const double VC = 410.0;
 
     void stampLinear() override {
         // --- Sources Topology ---
-        stampVoltageSource_A(V_N001, GND, 0); // Input from V1B (v_idx=0)
-        stampVoltageSource_A(V_N010, GND, 1); // VC Power Supply (v_idx=1)
-        b_linear[NumNodes + 1] = VC;
+        stampVoltageSource_A(V_N020, GND, 0); // Input from Tone Stack
+        stampVoltageSource_A(V_N003, GND, 1); // VE Power Supply
+        stampVoltageSource_A(V_N010, GND, 2); // VC Power Supply
+        b_linear[NumNodes + 1] = VE;
+        b_linear[NumNodes + 2] = VC;
 
-        // --- Resistors ---
-        stampResistorLinear(V_N002, V_N001, R10);  // Rhythm Path
-        stampResistorLinear(V_N011, V_N024, R21);  // Lead Path
+        // --- V1B Stage ---
+        stampResistorLinear(V_N027, GND, R7);     // Cathode Resistor
+        stampResistorLinear(V_N009, V_N003, R8); // Plate Load Resistor
+        stampCapacitor_A(V_N027, GND, C13);      // Cathode Bypass Cap
+
+        // --- V1B Output Coupling (CRITICAL, NOW CORRECT) ---
+        // C7 couples the AC signal from the plate (N009) to the junction node (N001)
+        stampCapacitor_A(V_N001, V_N009, C7);
+        // R9 provides the DC path to ground for the junction node N001, acting as V1B's load
+        stampResistorLinear(V_N001, GND, R9);
+
+        // --- Mixer (Rhythm Path from N001) ---
+        stampResistorLinear(V_N002, V_N001, R10);
+        stampCapacitor_A(V_N002, V_N001, C10);
+
+        // --- Lead Path (Input from N001) ---
+        stampCapacitor_A(V_N011, V_N001, C21);
+        stampResistorLinear(V_N011, V_N024, R21);
         stampResistorLinear(V_N024, V_N029, RA_LEAD_DRIVE);
         stampResistorLinear(V_N029, GND, RC_LEAD_DRIVE);
         stampResistorLinear(V_N029, GND, R22);
+
+        // --- V3B Stage ---
         stampResistorLinear(V_N017, V_N010, R26);
         stampResistorLinear(V_N035, GND, R23);
-        stampResistorLinear(V_N030, V_N018, R25);
-        stampResistorLinear(V_N030, GND, R24);
-        stampResistorLinear(V_N025, V_N010, R27);
-        stampResistorLinear(V_N034, GND, R30);
-        stampResistorLinear(V_N002, V_N026, R31);
-        stampResistorLinear(V_N002, GND, R11);
-        stampResistorLinear(V_N002, GND, R32);
-
-        // --- Capacitor Conductances ---
-        stampCapacitor_A(V_N002, V_N001, C10);
-        stampCapacitor_A(V_N011, V_N001, C21);
         stampCapacitor_A(V_N035, GND, C23);
         stampCapacitor_A(V_N035, V_N029, C22);
+
+        // --- V3B->V4A Coupling ---
         stampCapacitor_A(V_N018, V_N017, C25);
+        stampResistorLinear(V_N030, V_N018, R25);
+        stampResistorLinear(V_N030, GND, R24);
         stampCapacitor_A(V_N030, GND, C24);
+
+        // --- V4A Stage ---
+        stampResistorLinear(V_N025, V_N010, R27);
+        stampResistorLinear(V_N034, GND, R30);
         stampCapacitor_A(V_N034, GND, C29);
+
+        // --- V4A->Mixer Coupling ---
         stampCapacitor_A(V_N026, V_N025, C30);
+        stampResistorLinear(V_N002, V_N026, R31);
         stampCapacitor_A(V_N002, V_N026, C31);
+
+        // --- Final Mixer Load ---
+        stampResistorLinear(V_N002, GND, R11);
+        stampResistorLinear(V_N002, GND, R32);
         stampCapacitor_A(V_N002, GND, C11);
         stampCapacitor_A(V_N002, GND, C32);
     }
 
     void stampDynamic(double in) override {
         stampVoltageSource_b(0, in);
-        stampCapacitor_b(V_N002, V_N001, cap_z_state[0]);
-        stampCapacitor_b(V_N011, V_N001, cap_z_state[1]);
-        stampCapacitor_b(V_N035, GND, cap_z_state[2]);
-        stampCapacitor_b(V_N035, V_N029, cap_z_state[3]);
-        stampCapacitor_b(V_N018, V_N017, cap_z_state[4]);
-        stampCapacitor_b(V_N030, GND, cap_z_state[5]);
-        stampCapacitor_b(V_N034, GND, cap_z_state[6]);
-        stampCapacitor_b(V_N026, V_N025, cap_z_state[7]);
-        stampCapacitor_b(V_N002, V_N026, cap_z_state[8]);
-        stampCapacitor_b(V_N002, GND, cap_z_state[9]);
-        stampCapacitor_b(V_N002, GND, cap_z_state[10]);
+        stampCapacitor_b(V_N027, GND, cap_z_state[0]);
+        stampCapacitor_b(V_N001, V_N009, cap_z_state[1]);
+        stampCapacitor_b(V_N002, V_N001, cap_z_state[2]);
+        stampCapacitor_b(V_N011, V_N001, cap_z_state[3]);
+        stampCapacitor_b(V_N035, GND, cap_z_state[4]);
+        stampCapacitor_b(V_N035, V_N029, cap_z_state[5]);
+        stampCapacitor_b(V_N018, V_N017, cap_z_state[6]);
+        stampCapacitor_b(V_N030, GND, cap_z_state[7]);
+        stampCapacitor_b(V_N034, GND, cap_z_state[8]);
+        stampCapacitor_b(V_N026, V_N025, cap_z_state[9]);
+        stampCapacitor_b(V_N002, V_N026, cap_z_state[10]);
+        stampCapacitor_b(V_N002, GND, cap_z_state[11]);
+        stampCapacitor_b(V_N002, GND, cap_z_state[12]);
     }
 
     void stampNonLinear(const std::array<double, NumUnknowns>& x) override {
+        // V1B
+        Triode::State ts1b = Triode::calculate(x[V_N009]-x[V_N027], x[V_N020]-x[V_N027]);
+        stampConductance(V_N009, V_N027, ts1b.g_p);
+        A[V_N009][V_N020]+=ts1b.g_g; A[V_N009][V_N027]-=ts1b.g_g;
+        A[V_N027][V_N020]-=ts1b.g_g; A[V_N027][V_N027]+=ts1b.g_g;
+        stampConductance(V_N020, V_N027, ts1b.g_ig);
         // V3B
         Triode::State ts3b = Triode::calculate(x[V_N017]-x[V_N035], x[V_N029]-x[V_N035]);
         stampConductance(V_N017, V_N035, ts3b.g_p);
@@ -110,6 +124,12 @@ private:
     }
 
     void stampNonLinear_b_only(const std::array<double, NumUnknowns>& x) override {
+        // V1B
+        Triode::State ts1b = Triode::calculate(x[V_N009]-x[V_N027], x[V_N020]-x[V_N027]);
+        double i_p1b_lin=ts1b.ip-ts1b.g_p*(x[V_N009]-x[V_N027])-ts1b.g_g*(x[V_N020]-x[V_N027]);
+        stampCurrentSource(V_N009, V_N027, i_p1b_lin);
+        double i_g1b_lin=ts1b.ig-ts1b.g_ig*(x[V_N020]-x[V_N027]);
+        stampCurrentSource(V_N020, V_N027, i_g1b_lin);
         // V3B
         Triode::State ts3b = Triode::calculate(x[V_N017]-x[V_N035], x[V_N029]-x[V_N035]);
         double i_p3b_lin=ts3b.ip-ts3b.g_p*(x[V_N017]-x[V_N035])-ts3b.g_g*(x[V_N029]-x[V_N035]);
@@ -125,11 +145,11 @@ private:
     }
 
 public:
-    LeadAndMixerStage() : cap_z_state(11, 0.0) {
-        R10=3.3e6;  R11=680e3; R21=680e3; R22=475e3; R23=1.5e3;  R24=68e3;
-        R25=270e3;  R26=82e3;  R27=274e3; R30=3.3e3; R31=220e3;  R32=100e3;
-        C10=20e-12; C11=47e-12; C21=0.02e-6; C22=120e-12; C23=2.2e-6; C24=1000e-12;
-        C25=0.022e-6; C29=0.22e-6; C30=0.047e-6; C31=250e-12; C32=500e-12;
+    V1B_and_LeadMixer() : cap_z_state(13, 0.0) {
+        R7=1.5e3; R8=100e3; R9=100e3; R10=3.3e6; R11=680e3; R21=680e3; R22=475e3;
+        R23=1.5e3; R24=68e3; R25=270e3; R26=82e3; R27=274e3; R30=3.3e3; R31=220e3; R32=100e3;
+        C7=0.1e-6; C10=20e-12; C11=47e-12; C13=22e-6; C21=0.02e-6; C22=120e-12; C23=2.2e-6;
+        C24=1000e-12; C25=0.022e-6; C29=0.22e-6; C30=0.047e-6; C31=250e-12; C32=500e-12;
         setGain(0.75);
     }
 
@@ -144,17 +164,19 @@ public:
 
     double process(double in) {
         solveNonlinear_Adaptive(in);
-        updateCapacitorState(x[V_N002], x[V_N001], C10, cap_z_state[0]);
-        updateCapacitorState(x[V_N011], x[V_N001], C21, cap_z_state[1]);
-        updateCapacitorState(x[V_N035], 0, C23, cap_z_state[2]);
-        updateCapacitorState(x[V_N035], x[V_N029], C22, cap_z_state[3]);
-        updateCapacitorState(x[V_N018], x[V_N017], C25, cap_z_state[4]);
-        updateCapacitorState(x[V_N030], 0, C24, cap_z_state[5]);
-        updateCapacitorState(x[V_N034], 0, C29, cap_z_state[6]);
-        updateCapacitorState(x[V_N026], x[V_N025], C30, cap_z_state[7]);
-        updateCapacitorState(x[V_N002], x[V_N026], C31, cap_z_state[8]);
-        updateCapacitorState(x[V_N002], 0, C11, cap_z_state[9]);
-        updateCapacitorState(x[V_N002], 0, C32, cap_z_state[10]);
+        updateCapacitorState(x[V_N027], 0, C13, cap_z_state[0]);
+        updateCapacitorState(x[V_N001], x[V_N009], C7, cap_z_state[1]);
+        updateCapacitorState(x[V_N002], x[V_N001], C10, cap_z_state[2]);
+        updateCapacitorState(x[V_N011], x[V_N001], C21, cap_z_state[3]);
+        updateCapacitorState(x[V_N035], 0, C23, cap_z_state[4]);
+        updateCapacitorState(x[V_N035], x[V_N029], C22, cap_z_state[5]);
+        updateCapacitorState(x[V_N018], x[V_N017], C25, cap_z_state[6]);
+        updateCapacitorState(x[V_N030], 0, C24, cap_z_state[7]);
+        updateCapacitorState(x[V_N034], 0, C29, cap_z_state[8]);
+        updateCapacitorState(x[V_N026], x[V_N025], C30, cap_z_state[9]);
+        updateCapacitorState(x[V_N002], x[V_N026], C31, cap_z_state[10]);
+        updateCapacitorState(x[V_N002], GND, C11, cap_z_state[11]);
+        updateCapacitorState(x[V_N002], GND, C32, cap_z_state[12]);
         return x[V_N002];
     }
 };
