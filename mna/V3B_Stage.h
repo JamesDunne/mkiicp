@@ -4,149 +4,122 @@
 #include "Triode.h"
 #include <vector>
 
-// This class correctly models Stage 4 (V3B) and its subsequent load, Stage 5 (LeadPathCoupling).
-// By solving them together, the AC and DC characteristics will match the simulation accurately.
+// This "super-stage" combines V3B with its full input/output coupling networks.
 //
-// Input:  Voltage at node N029.
-// Output: Voltage at node N030.
+// THIS IS THE CORRECTED VERSION: It properly models the input signal from N001
+// as a dedicated voltage source, creating a well-defined and solvable system.
 //
-// SPICE components: XV3B, R26, R23, C23, C22, C25, R25, R24, C24, and VC power supply.
-// The system has 6 unknown nodes and 2 voltage sources.
-class V3B_and_Coupling : public MNASolver<6, 2> {
+// Replaces: Coupling1, V3B_Stage, and LeadPathCoupling.
+//
+// Input:  Voltage from the previous stage.
+// Output: Voltage at node N030 (to V4A_Stage).
+//
+// The system now has 9 unknown nodes and 2 voltage sources.
+class V3B_and_IO_Coupling : public MNASolver<9, 2> {
 private:
     static constexpr int GND = -1;
-
     enum Var {
-        V_N017 = 0, // V3B Plate
-        V_N029,     // V3B Grid (Input)
+        V_N001 = 0, // Input signal node
+        V_N011,     // After input cap C21
+        V_N024,     // Input network (pot top)
+        V_N029,     // V3B Grid
+        V_N017,     // V3B Plate
         V_N035,     // V3B Cathode
         V_N010,     // Power Supply Node
-        V_N018,     // Coupling Network intermediate node
-        V_N030      // Coupling Network Output node
-        // V-Source Currents at indices 6 and 7
+        V_N018,     // Output network
+        V_N030      // Final Output
+        // V-sources at indices 9 and 10
     };
 
-    // Component values
-    double R23, R24, R25, R26;
-    double C22, C23, C24, C25;
+    double R21, R22, R23, R24, R25, R26;
+    double RA_LEAD_DRIVE, RC_LEAD_DRIVE;
+    double C21, C22, C23, C24, C25;
 
-    // State variables for the capacitors
     std::vector<double> cap_z_state;
-
     const double VC = 410.0;
 
-    void stampComponents(double inputVoltage) {
-        resetMatrices();
-
-        // --- Sources ---
-        stampVoltageSource(V_N029, GND, 0, inputVoltage);
-        stampVoltageSource(V_N010, GND, 1, VC);
-
-        // --- Static Components ---
-        stampResistor(V_N017, V_N010, R26); // V3B Plate Load
-        stampResistor(V_N035, GND, R23);    // V3B Cathode Resistor
-        stampResistor(V_N030, V_N018, R25); // Coupling Resistor
-        stampResistor(V_N030, GND, R24);    // Coupling Load Resistor
-
-        // --- Capacitors ---
-        stampCapacitor(V_N035, GND, C23, cap_z_state[0]);       // V3B Cathode Bypass
-        stampCapacitor(V_N035, V_N029, C22, cap_z_state[1]);   // V3B High-cut
-        stampCapacitor(V_N018, V_N017, C25, cap_z_state[2]);   // Output Coupling Cap
-        stampCapacitor(V_N030, GND, C24, cap_z_state[3]);       // Coupling Low-pass Cap
-    }
-
     void stampLinear() override {
-        // --- Sources ---
-        stampVoltageSource_A(V_N029, GND, 0);
-        stampVoltageSource_A(V_N010, GND, 1);
+        // --- Sources Topology ---
+        stampVoltageSource_A(V_N001, GND, 0); // Input source
+        stampVoltageSource_A(V_N010, GND, 1); // Power supply
+        b_linear[NumNodes + 1] = VC;
 
-        // --- Static Components ---
-        stampResistorLinear(V_N017, V_N010, R26); // V3B Plate Load
-        stampResistorLinear(V_N035, GND, R23);    // V3B Cathode Resistor
-        stampResistorLinear(V_N030, V_N018, R25); // Coupling Resistor
-        stampResistorLinear(V_N030, GND, R24);    // Coupling Load Resistor
+        // --- Resistors ---
+        stampResistorLinear(V_N011, V_N024, R21);
+        stampResistorLinear(V_N024, V_N029, RA_LEAD_DRIVE);
+        stampResistorLinear(V_N029, GND, RC_LEAD_DRIVE);
+        stampResistorLinear(V_N029, GND, R22);
+        stampResistorLinear(V_N017, V_N010, R26);
+        stampResistorLinear(V_N035, GND, R23);
+        stampResistorLinear(V_N030, V_N018, R25);
+        stampResistorLinear(V_N030, GND, R24);
 
-        // --- Capacitors ---
-        stampCapacitor_A(V_N035, GND, C23);       // V3B Cathode Bypass
-        stampCapacitor_A(V_N035, V_N029, C22);    // V3B High-cut
-        stampCapacitor_A(V_N018, V_N017, C25);    // Output Coupling Cap
-        stampCapacitor_A(V_N030, GND, C24);       // Coupling Low-pass Cap
+        // --- Capacitor Conductances ---
+        stampCapacitor_A(V_N011, V_N001, C21); // Correctly stamped between two nodes
+        stampCapacitor_A(V_N035, GND, C23);
+        stampCapacitor_A(V_N035, V_N029, C22);
+        stampCapacitor_A(V_N018, V_N017, C25);
+        stampCapacitor_A(V_N030, GND, C24);
     }
 
     void stampDynamic(double in) override {
-        // --- Sources ---
+        // Set the dynamic input voltage value
         stampVoltageSource_b(0, in);
-        stampVoltageSource_b(1, VC);
 
-        // --- Capacitors ---
-        stampCapacitor_b(V_N035, GND, cap_z_state[0]);       // C23 - V3B Cathode Bypass
-        stampCapacitor_b(V_N035, V_N029, cap_z_state[1]);    // C22 - V3B High-cut
-        stampCapacitor_b(V_N018, V_N017, cap_z_state[2]);    // C25 - Output Coupling Cap
-        stampCapacitor_b(V_N030, GND, cap_z_state[3]);       // C24 - Coupling Low-pass Cap
+        // History currents
+        stampCapacitor_b(V_N011, V_N001, cap_z_state[0]);
+        stampCapacitor_b(V_N035, GND, cap_z_state[1]);
+        stampCapacitor_b(V_N035, V_N029, cap_z_state[2]);
+        stampCapacitor_b(V_N018, V_N017, cap_z_state[3]);
+        stampCapacitor_b(V_N030, GND, cap_z_state[4]);
     }
 
     void stampNonLinear(const std::array<double, NumUnknowns>& current_x) override {
-        // XV3B: Plate=N017, Grid=N029, Cathode=N035
-        double v_p = current_x[V_N017];
-        double v_g = current_x[V_N029];
-        double v_c = current_x[V_N035];
-
-        Triode::State ts = Triode::calculate(v_p - v_c, v_g - v_c);
-
-        double i_p_lin = ts.ip - ts.g_p * (v_p - v_c) - ts.g_g * (v_g - v_c);
-        stampCurrentSource(V_N017, V_N035, i_p_lin);
+        double v_p=current_x[V_N017], v_g=current_x[V_N029], v_c=current_x[V_N035];
+        Triode::State ts=Triode::calculate(v_p-v_c, v_g-v_c);
         stampConductance(V_N017, V_N035, ts.g_p);
-
-        A[V_N017][V_N029] += ts.g_g;
-        A[V_N017][V_N035] -= ts.g_g;
-        A[V_N035][V_N029] -= ts.g_g;
-        A[V_N035][V_N035] += ts.g_g;
-
-        double i_g_lin = ts.ig - ts.g_ig * (v_g - v_c);
-        stampCurrentSource(V_N029, V_N035, i_g_lin);
+        A[V_N017][V_N029] += ts.g_g; A[V_N017][V_N035] -= ts.g_g;
+        A[V_N035][V_N029] -= ts.g_g; A[V_N035][V_N035] += ts.g_g;
         stampConductance(V_N029, V_N035, ts.g_ig);
+        stampNonLinear_b_only(current_x);
     }
 
     void stampNonLinear_b_only(const std::array<double, NumUnknowns>& current_x) override {
-        // XV3B: Plate=N017, Grid=N029, Cathode=N035
-        double v_p = current_x[V_N017];
-        double v_g = current_x[V_N029];
-        double v_c = current_x[V_N035];
-
-        Triode::State ts = Triode::calculate(v_p - v_c, v_g - v_c);
-
-        double i_p_lin = ts.ip - ts.g_p * (v_p - v_c) - ts.g_g * (v_g - v_c);
+        double v_p=current_x[V_N017], v_g=current_x[V_N029], v_c=current_x[V_N035];
+        Triode::State ts=Triode::calculate(v_p-v_c, v_g-v_c);
+        double i_p_lin=ts.ip-ts.g_p*(v_p-v_c)-ts.g_g*(v_g-v_c);
         stampCurrentSource(V_N017, V_N035, i_p_lin);
-
-        double i_g_lin = ts.ig - ts.g_ig * (v_g - v_c);
+        double i_g_lin=ts.ig-ts.g_ig*(v_g-v_c);
         stampCurrentSource(V_N029, V_N035, i_g_lin);
     }
 
 public:
-    V3B_and_Coupling() : cap_z_state(4, 0.0) {
-        // V3B components
-        R23 = 1.5e3;
-        R26 = 82e3;
-        C22 = 120e-12;
-        C23 = 2.2e-6;
-        // Coupling components
-        R24 = 68e3;
-        R25 = 270e3;
-        C24 = 1000e-12;
-        C25 = 0.022e-6;
+    V3B_and_IO_Coupling() : cap_z_state(5, 0.0) {
+        C21 = 0.02e-6; R21 = 680e3; R22 = 475e3;
+        R23 = 1.5e3; R26 = 82e3; C22 = 120e-12; C23 = 2.2e-6;
+        R24 = 68e3; R25 = 270e3; C24 = 1000e-12; C25 = 0.022e-6;
+        setGain(0.75);
+    }
+
+    void setGain(double val) {
+        double p = val * val;
+        RA_LEAD_DRIVE = 1e6 * (1.0 - p);
+        RC_LEAD_DRIVE = 1e6 * p;
+        if (RA_LEAD_DRIVE < 1) RA_LEAD_DRIVE = 1;
+        if (RC_LEAD_DRIVE < 1) RC_LEAD_DRIVE = 1;
+        setDirty();
     }
 
     double process(double in) {
-        // solveNonlinear(in);
-        // solveNonlinear_Simplified(in);
         solveNonlinear_Adaptive(in);
 
-        updateCapacitorState(x[V_N035], 0, C23, cap_z_state[0]);
-        updateCapacitorState(x[V_N035], x[V_N029], C22, cap_z_state[1]);
-        updateCapacitorState(x[V_N018], x[V_N017], C25, cap_z_state[2]);
-        updateCapacitorState(x[V_N030], 0, C24, cap_z_state[3]);
+        // Update capacitor states
+        updateCapacitorState(x[V_N011], x[V_N001], C21, cap_z_state[0]);
+        updateCapacitorState(x[V_N035], 0, C23, cap_z_state[1]);
+        updateCapacitorState(x[V_N035], x[V_N029], C22, cap_z_state[2]);
+        updateCapacitorState(x[V_N018], x[V_N017], C25, cap_z_state[3]);
+        updateCapacitorState(x[V_N030], 0, C24, cap_z_state[4]);
 
-        // The output of the combined stage is the voltage at node N030
         return x[V_N030];
     }
 };

@@ -15,8 +15,7 @@ private:
     // following the `V1A_ToneStack` example.
     V1A_ToneStack v1aToneStack;
     V1B_Stage v1b;
-    Coupling1 v1bCoupling;
-    V3B_and_Coupling v3b;
+    V3B_and_IO_Coupling v3b;
     V4A_and_MixerLoad v4a;
     MixerAndV2B mixerv2b;
     V2A_OutputStage v2aOutput;
@@ -29,7 +28,6 @@ public:
     void setup(double sampleRate) {
         v1aToneStack.setup(sampleRate);
         v1b.setup(sampleRate);
-        v1bCoupling.setup(sampleRate);
         v3b.setup(sampleRate);
         v4a.setup(sampleRate);
         mixerv2b.setup(sampleRate);
@@ -41,32 +39,28 @@ public:
     void setTreble(double val) { v1aToneStack.setTreble(val); }
     void setBass(double val) { v1aToneStack.setBass(val); }
     void setMid(double val) { v1aToneStack.setMid(val); }
-    void setGain(double val) { v1bCoupling.setGain(val); }
+    void setGain(double val) { v3b.setGain(val); }
     void setMaster(double val) { v2aOutput.setMaster(val); }
 
     double processSample(double in) {
-        double out_s1 = v1aToneStack.process(in);
-        // return out_s1;
+        double out_v1a = v1aToneStack.process(in);
+        // return out_v1a;
 
-        double out_s2 = v1b.process(out_s1);
-        // return out_s2;
+        double out_v1b = v1b.process(out_v1a);
+        // return out_v1b;
 
-        double out_s3 = v1bCoupling.process(out_s2); // out is N001
-        // return out_s3;
+        double out_v3b = v3b.process(out_v1b);
+        // return out_v3b;
 
-        double lead_path_in = out_s3;
-        double out_s4 = v3b.process(lead_path_in);
-        return out_s4;
-
-        double out_s5 = v4a.process(out_s4);
-        // return out_s5;
+        double out_v4a = v4a.process(out_v3b);
+        // return out_v4a;
 
         // Mixer stage:
-        double out_s8 = mixerv2b.process(out_s5, out_s3);
-        // return out_s8;
+        double out_v2b = mixerv2b.process(out_v4a, out_v1b);
+        // return out_v2b;
 
         // Final V2A output stage:
-        double out_s9 = v2aOutput.process(out_s8);
-        return out_s9;
+        double out_master = v2aOutput.process(out_v2b);
+        return out_master;
     }
 };

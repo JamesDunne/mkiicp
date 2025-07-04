@@ -105,7 +105,8 @@ public:
 
     double process(double in) {
         // solveNonlinear(in);
-        solveNonlinear_Simplified(in);
+        // solveNonlinear_Simplified(in);
+        solveNonlinear_Adaptive(in);
 
         updateCapacitorState(x[V_N034], 0, C29, cap_z_state[0]);
         updateCapacitorState(x[V_N026], x[V_N025], C30, cap_z_state[1]);
