@@ -49,6 +49,7 @@ int main(int argc, const char *argv[]) {
     std::cout << min << " " << max << std::endl;
 
     Triode::printStats();
+    std::cout << converged << "/" << diverged << "/" << failed << std::endl;
 
     return 0;
 }

@@ -14,6 +14,8 @@
 #define RESTRICT
 #endif
 
+inline static long long converged = 0, diverged = 0, failed = 0;
+
 template <size_t Ns, size_t Vs>
 class MNASolver {
 public:
@@ -402,75 +404,77 @@ protected:
             isDirty = false;
         }
 
-        const int MAX_ITER = 30;
+        const int MAX_ITER = 50;
         const double CONVERGENCE_THRESH = 1e-6;
         const double DAMPING_LIMIT = 1.0;
-        const double STALL_THRESHOLD = 0.9; // If error shrinks by less than 10%, we're stalling
+        const double STALL_THRESHOLD = 0.9;
 
         std::array<double, NumUnknowns> current_x = x;
         double last_norm = 1e9;
-        bool recompute_jacobian = true; // Always compute on the first iteration of a sample
+        bool recompute_jacobian = true; // Always true for the first iteration
+        bool just_dampened = false;     // NEW: Flag to track if the last step was dampened
 
+        double max_delta_abs = 0.0;
         for (int i = 0; i < MAX_ITER; ++i) {
             // --- Step 1: Adaptive Jacobian Update ---
-            if (recompute_jacobian) {
-                // Build the full Jacobian matrix A using the current guess
+            // Recompute if it's the first run, if we stalled, OR if we just took a big, dampened step.
+            if (recompute_jacobian || just_dampened) {
                 A = A_linear;
                 stampDynamic(in);
                 stampNonLinear(current_x);
-
                 if (!lu_decompose()) {
                     x.fill(0.0);
+                    failed++;
                     return;
                 }
-                recompute_jacobian = false; // Reset the flag
+                recompute_jacobian = false;
+                just_dampened = false;
             }
 
-            // --- Step 2: Solve the system using the current LU factorization ---
-            // Build the dynamic right-hand-side 'b' vector.
-            // Note: We don't need to rebuild A here, only b.
+            // --- Step 2: Solve the system ---
             b = b_linear;
             stampDynamic(in);
-            stampNonLinear_b_only(current_x); // A new helper to only stamp non-linear sources
-
+            stampNonLinear_b_only(current_x);
             std::array<double, NumUnknowns> next_x;
             lu_solve(next_x);
 
             // --- Step 3: Calculate update delta and check for stall/convergence ---
             double norm = 0.0;
-            for (size_t j = 0; j < NumNodes; ++j) {
-                double delta = next_x[j] - current_x[j];
-                norm += delta * delta;
+            std::array<double, NumUnknowns> delta_x;
+            for (size_t j = 0; j < NumUnknowns; ++j) {
+                delta_x[j] = next_x[j] - current_x[j];
+                if (j < NumNodes) norm += delta_x[j] * delta_x[j];
             }
             norm = std::sqrt(norm);
 
             if (norm < CONVERGENCE_THRESH) {
                 x = next_x;
+                converged++;
                 return; // Converged!
             }
 
-            // Stall detection
-            if (norm > last_norm * STALL_THRESHOLD && i > 0) {
+            if (norm > last_norm * STALL_THRESHOLD && i > 1) {
                 recompute_jacobian = true;
             }
             last_norm = norm;
 
             // --- Step 4: Apply Dampened Update ---
-            current_x = next_x; // Use the full step and let dampening handle overshoots in the *next* iter
-                                // OR apply dampening directly for more stability:
-            double max_delta = 0.0;
-            for(size_t j=0; j<NumNodes; ++j) { max_delta = std::max(max_delta, std::abs(next_x[j] - current_x[j])); }
+            max_delta_abs = 0.0;
+            for(size_t j = 0; j < NumNodes; ++j) { max_delta_abs = std::max(max_delta_abs, std::abs(delta_x[j]));}
 
-            if (max_delta > DAMPING_LIMIT) {
-                double scale = DAMPING_LIMIT / max_delta;
-                for (size_t j = 0; j < NumUnknowns; ++j) {
-                    current_x[j] = x[j] + scale * (next_x[j] - x[j]);
-                }
-            } else {
-                 current_x = next_x;
+            double scale = 1.0;
+            if (max_delta_abs > DAMPING_LIMIT) {
+                scale = DAMPING_LIMIT / max_delta_abs;
+                just_dampened = true; // Set the flag for the next iteration!
+            }
+
+            for (size_t j = 0; j < NumUnknowns; ++j) {
+                current_x[j] += scale * delta_x[j];
             }
         }
-        std::cerr << "diverged" << std::endl;
+        diverged++;
+        std::cerr << "diverged max_delta = " << std::setw(11) << std::setprecision(6) << max_delta_abs
+            << ", norm = " << std::setw(11) << std::setprecision(6) << last_norm << std::endl;
         x = current_x;
     }
 
