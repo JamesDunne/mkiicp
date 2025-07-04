@@ -100,10 +100,18 @@ private:
 
         // --- Grid Current Calculation ---
         if (v_g > 0) {
-            // Simple model for the diode + RGI in series.
-            double Vd = v_g; // The voltage across the series pair
-            s.ig = Vd / RGI; // Ohm's law approximation
-            s.g_ig = 1.0 / RGI;
+            // Non-linear Shockley diode equation.
+            // This provides the correct non-linear loading on the grid.
+            // We use a simplified model for the series RGI resistor by adding its
+            // conductance, which is a very good approximation for this use case.
+            double Vd = v_g;
+            s.ig = IS * (exp(Vd / VT) - 1.0);
+            s.g_ig = (IS / VT) * exp(Vd / VT);
+
+            // Add the effect of the series RGI resistor
+            // This is a simplification but captures the current-limiting behavior.
+            s.ig += Vd / RGI;
+            s.g_ig += 1.0 / RGI;
         }
 
         // Clamp conductances to prevent instability
