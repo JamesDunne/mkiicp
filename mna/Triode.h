@@ -156,12 +156,12 @@ public:
 
         // Find grid position and interpolation weight
         double vg_pos = (v_g - MIN_VG) * inv_vg_step;
-        int vg_idx = static_cast<int>(vg_pos);
+        int vg_idx = std::clamp(static_cast<int>(vg_pos), 0, VG_STEPS - 2);
         double vg_t = vg_pos - vg_idx;
 
         // Find plate position and interpolation weight
         double vp_pos = (v_p - MIN_VP) * inv_vp_step;
-        int vp_idx = static_cast<int>(vp_pos);
+        int vp_idx = std::clamp(static_cast<int>(vp_pos), 0, VP_STEPS - 2);
         double vp_t = vp_pos - vp_idx;
 
         // Get the four corner points from the LUT for interpolation
