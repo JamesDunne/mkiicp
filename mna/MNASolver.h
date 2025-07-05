@@ -426,11 +426,13 @@ protected:
         x = current_x;
     }
 
-    virtual void stampDynamic_b(double in, std::array<double, NumUnknowns>& b_vector) {}
+    virtual void stampDynamic_b_only(double in, std::array<double, NumUnknowns>& b_vector) {}
     // Stamps ONLY conductances (the Jacobian) into A
     virtual void stampNonLinear_A(const std::array<double, NumUnknowns>& x) {}
     // Adds ONLY pure non-linear currents to a vector
     virtual void addNonlinear_b(std::array<double, NumUnknowns>& b, const std::array<double, NumUnknowns>& x) const {}
+    // New virtual function to handle the source vector part of the residual
+    virtual void subtractSources(std::array<double, NumUnknowns>& residual, double in) const {}
 
     // --- The Definitive Newton-Raphson Solver ---
     void solveNonlinear_Real(double in) {
@@ -441,7 +443,7 @@ protected:
             isDirty = false;
         }
 
-        const int MAX_ITER = 20; // Standard Newton converges very fast.
+        const int MAX_ITER = 60; // Standard Newton converges very fast.
         const double REL_TOL = 1e-7;
         const double ABS_TOL = 1e-10;
 
@@ -450,41 +452,40 @@ protected:
 
         for (int i = 0; i < MAX_ITER; ++i) {
             // --- Step 1: Build the full Jacobian J (our 'A' matrix) at every iteration ---
+            // This is the Standard Newton Method - most robust.
             A = A_linear;
             stampNonLinear_A(current_x);
 
-            // --- Step 2: Build the full source vector 'b_full' ---
-            // This vector contains ALL current sources: linear, dynamic (caps), and input.
+            // --- Step 2: Build the full source vector b(x) ---
+            // This vector contains ALL current sources: linear, dynamic (caps), and non-linear.
             std::array<double, NumUnknowns> b_full = b_linear;
-            stampDynamic_b(in, b_full); // A new helper to stamp dynamic sources into b_full
+            stampDynamic_b_only(in, b_full); // Adds input source and capacitor history currents
+            addNonlinear_b(b_full, current_x); // Adds pure non-linear triode currents
 
-            // --- Step 3: Build the physically correct residual vector f(x) ---
-            // f(x) = (A_full)*x - (b_full + I_nonlinear(x))
-            // where A_full is the Jacobian J we just built.
-            std::array<double, NumUnknowns> residual = b_full; // Start with sources
-            addNonlinear_b(residual, current_x); // Add non-linear currents
-
-            // Subtract A*x from b_full+I_nl to get -(A*x - (b_full+I_nl)) = -f(x)
+            // --- Step 3: Build the physically correct residual vector f(x) = J*x - b(x) ---
+            std::array<double, NumUnknowns> residual;
             for (size_t r = 0; r < NumUnknowns; ++r) {
-                double Ax_r = 0;
+                double Jx_r = 0;
                 for (size_t c = 0; c < NumUnknowns; ++c) {
-                    Ax_r += A[r][c] * current_x[c];
+                    Jx_r += A[r][c] * current_x[c];
                 }
-                residual[r] -= Ax_r;
+                residual[r] = Jx_r - b_full[r];
             }
 
-            // --- Step 4: Solve J*dx = -f(x) ---
-            // Note: Our residual is already -f(x), so we solve J*dx = residual
+
+            // --- Step 3: Solve J*dx = -f(x) ---
             if (!lu_decompose()) {
                 x = current_x;
                 failed++;
                 return;
             }
 
+            for (size_t j = 0; j < NumUnknowns; ++j) { residual[j] = -residual[j]; }
+
             std::array<double, NumUnknowns> delta_x;
             lu_solve_rhs(residual, delta_x);
 
-            // --- Step 5: Apply Update and Check Convergence ---
+            // --- Step 4: Apply Update and Check Convergence ---
             double delta_norm = 0.0, x_norm = 0.0;
             for (size_t j = 0; j < NumUnknowns; ++j) {
                 current_x[j] += delta_x[j];

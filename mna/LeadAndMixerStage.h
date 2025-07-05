@@ -103,7 +103,7 @@ private:
         stampCapacitor_b(V_N002, GND, cap_z_state[12]);
     }
 
-    void stampDynamic_b(double in, std::array<double, NumUnknowns>& b_vector) override {
+    void stampDynamic_b_only(double in, std::array<double, NumUnknowns>& b_vector) override {
         stampVoltageSource_b_vector(0, in, b_vector);
         stampCapacitor_b_vector(V_N027, GND, cap_z_state[0], b_vector);
         stampCapacitor_b_vector(V_N001, V_N009, cap_z_state[1], b_vector);
@@ -120,6 +120,16 @@ private:
         stampCapacitor_b_vector(V_N002, GND, cap_z_state[12], b_vector);
     }
 
+    void subtractSources(std::array<double, 20> &residual, double in) const override {
+        // v_idx = 0: Input source
+        residual[NumNodes + 0] -= in;
+        // v_idx = 1: VE Power Supply
+        residual[NumNodes + 1] -= VE;
+        // v_idx = 2: VC Power Supply
+        residual[NumNodes + 2] -= VC;
+    }
+
+private:
     void stampNonLinear(const std::array<double, NumUnknowns>& x) override {
         // Calculate the state of each triode ONCE.
         Triode::State ts1b = Triode::calculate(x[V_N009]-x[V_N027], x[V_N020]-x[V_N027]);
@@ -189,22 +199,16 @@ private:
     void addNonlinear_b(std::array<double, NumUnknowns>& b, const std::array<double, NumUnknowns>& x) const override {
         // V1B
         Triode::State ts1b = Triode::calculate(x[V_N009]-x[V_N027], x[V_N020]-x[V_N027]);
-        b[V_N009] += ts1b.ip;
-        b[V_N027] -= ts1b.ip;
-        b[V_N020] += ts1b.ig;
-        b[V_N027] -= ts1b.ig;
+        b[V_N009] += ts1b.ip; b[V_N027] -= ts1b.ip;
+        b[V_N020] += ts1b.ig; b[V_N027] -= ts1b.ig;
         // V3B
         Triode::State ts3b = Triode::calculate(x[V_N017]-x[V_N035], x[V_N029]-x[V_N035]);
-        b[V_N017] += ts3b.ip;
-        b[V_N035] -= ts3b.ip;
-        b[V_N029] += ts3b.ig;
-        b[V_N035] -= ts3b.ig;
+        b[V_N017] += ts3b.ip; b[V_N035] -= ts3b.ip;
+        b[V_N029] += ts3b.ig; b[V_N035] -= ts3b.ig;
         // V4A
         Triode::State ts4a = Triode::calculate(x[V_N025]-x[V_N034], x[V_N030]-x[V_N034]);
-        b[V_N025] += ts4a.ip;
-        b[V_N034] -= ts4a.ip;
-        b[V_N030] += ts4a.ig;
-        b[V_N034] -= ts4a.ig;
+        b[V_N025] += ts4a.ip; b[V_N034] -= ts4a.ip;
+        b[V_N030] += ts4a.ig; b[V_N034] -= ts4a.ig;
     }
 
 public:
@@ -227,8 +231,8 @@ public:
 
     double process(double in) {
         // solveNonlinear(in);
-        // solveNonlinear_Adaptive(in);
-        solveNonlinear_Real(in);
+        solveNonlinear_Adaptive(in);
+        // solveNonlinear_Real(in);
         updateCapacitorState(x[V_N027], 0, C13, cap_z_state[0]);
         updateCapacitorState(x[V_N001], x[V_N009], C7, cap_z_state[1]);
         updateCapacitorState(x[V_N002], x[V_N001], C10, cap_z_state[2]);
