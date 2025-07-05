@@ -402,7 +402,8 @@ protected:
             x_norm = std::sqrt(x_norm);
 
             if (delta_norm < (x_norm * REL_TOL + ABS_TOL)) {
-                x = current_x;
+                // x = current_x;
+                x = next_x;
                 converged++;
                 return; // Converged!
             }

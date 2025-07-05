@@ -173,7 +173,7 @@ private:
         stampCurrentSource(V_N030, V_N034, i_g4a_lin);
     }
 
-        // Stamps ONLY the Jacobian (conductances)
+    // Stamps ONLY the Jacobian (conductances)
     void stampNonLinear_A(const std::array<double, NumUnknowns>& x) override {
         // V1B
         Triode::State ts1b = Triode::calculate(x[V_N009]-x[V_N027], x[V_N020]-x[V_N027]);
