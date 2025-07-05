@@ -40,7 +40,7 @@ int main(int argc, const char *argv[]) {
             double out = preamp.processSample(sample);
             if (out > max) max = out;
             if (out < min) min = out;
-            // std::cout << std::fixed << std::setprecision(6) << out << std::endl;
+            std::cout << std::fixed << std::setprecision(6) << out << std::endl;
             return out / 410.0;
         }
     );
@@ -53,7 +53,8 @@ int main(int argc, const char *argv[]) {
 
     Triode::printStats();
     std::cout << converged << "," << diverged << "," << failed << std::endl;
-    std::cout << ((double)diverged / (double)(diverged + converged) * 100.0) << "% diverged" << std::endl;
+    std::cout << ((double)diverged / (double)(diverged + converged + failed) * 100.0) << "% diverged" << std::endl;
+    std::cout << ((double)failed / (double)(diverged + converged + failed) * 100.0) << "% failed" << std::endl;
 
     return 0;
 }

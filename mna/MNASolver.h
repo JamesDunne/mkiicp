@@ -126,6 +126,13 @@ protected:
         if (n2 != -1) b[n2] -= z_state;
     }
 
+    void stampCapacitor_b_vector(int n1, int n2, const double& z_state, std::array<double, NumUnknowns> &b_vector) {
+        // The z_state *is* the history current source I_eq.
+        // Current flows from n2 to n1.
+        if (n1 != -1) b_vector[n1] += z_state;
+        if (n2 != -1) b_vector[n2] -= z_state;
+    }
+
     // Updates the capacitor's history state 'z' for the next time step.
     void updateCapacitorState(double v_n1, double v_n2, double C, double& z_state) {
         double Gc = invT_2 * C;
@@ -168,6 +175,9 @@ protected:
      */
     void stampVoltageSource_b(int v_idx, double voltage) {
         b[NumNodes + v_idx] = voltage; // Use '=' instead of '+=' as it's the only source here
+    }
+    void stampVoltageSource_b_vector(int v_idx, double voltage, std::array<double, NumUnknowns> &b_vector) {
+        b_vector[NumNodes + v_idx] += voltage;
     }
 
     void stampConductance(int n1, int n2, double g) {
@@ -249,18 +259,26 @@ protected:
         }
     }
 
-    // This helper now takes the residual 'f(x)' and calculates 'dx = J_inv * f(x)'
-    void lu_solve_residual(const std::array<double, NumUnknowns>& rhs, std::array<double, NumUnknowns>& result) {
+    // This solver helper now takes the RHS vector as an argument
+    void lu_solve_rhs(const std::array<double, NumUnknowns>& rhs, std::array<double, NumUnknowns>& result) {
         std::array<double, NumUnknowns> temp_b;
-        for (size_t i = 0; i < NumUnknowns; ++i) { temp_b[i] = rhs[pivot[i]]; }
+        for (size_t i = 0; i < NumUnknowns; ++i) {
+            temp_b[i] = rhs[pivot[i]];
+        }
+        // Forward substitution
         for (size_t i = 0; i < NumUnknowns; ++i) {
             double sum = temp_b[i];
-            for (size_t j = 0; j < i; ++j) { sum -= A_lu[i][j] * result[j]; }
+            for (size_t j = 0; j < i; ++j) {
+                sum -= A_lu[i][j] * result[j];
+            }
             result[i] = sum;
         }
+        // Backward substitution
         for (int i = NumUnknowns - 1; i >= 0; --i) {
             double sum = result[i];
-            for (size_t j = i + 1; j < NumUnknowns; ++j) { sum -= A_lu[i][j] * result[j]; }
+            for (size_t j = i + 1; j < NumUnknowns; ++j) {
+                sum -= A_lu[i][j] * result[j];
+            }
             result[i] = sum / A_lu[i][i];
         }
     }
@@ -406,5 +424,85 @@ protected:
         }
         diverged++;
         x = current_x;
+    }
+
+    virtual void stampDynamic_b(double in, std::array<double, NumUnknowns>& b_vector) {}
+    // Stamps ONLY conductances (the Jacobian) into A
+    virtual void stampNonLinear_A(const std::array<double, NumUnknowns>& x) {}
+    // Adds ONLY pure non-linear currents to a vector
+    virtual void addNonlinear_b(std::array<double, NumUnknowns>& b, const std::array<double, NumUnknowns>& x) const {}
+
+    // --- The Definitive Newton-Raphson Solver ---
+    void solveNonlinear_Real(double in) {
+        if (isDirty) {
+            A_linear.fill({});
+            b_linear.fill({});
+            stampLinear();
+            isDirty = false;
+        }
+
+        const int MAX_ITER = 20; // Standard Newton converges very fast.
+        const double REL_TOL = 1e-7;
+        const double ABS_TOL = 1e-10;
+
+        // Start with the last known good solution as our guess
+        std::array<double, NumUnknowns> current_x = x;
+
+        for (int i = 0; i < MAX_ITER; ++i) {
+            // --- Step 1: Build the full Jacobian J (our 'A' matrix) at every iteration ---
+            A = A_linear;
+            stampNonLinear_A(current_x);
+
+            // --- Step 2: Build the full source vector 'b_full' ---
+            // This vector contains ALL current sources: linear, dynamic (caps), and input.
+            std::array<double, NumUnknowns> b_full = b_linear;
+            stampDynamic_b(in, b_full); // A new helper to stamp dynamic sources into b_full
+
+            // --- Step 3: Build the physically correct residual vector f(x) ---
+            // f(x) = (A_full)*x - (b_full + I_nonlinear(x))
+            // where A_full is the Jacobian J we just built.
+            std::array<double, NumUnknowns> residual = b_full; // Start with sources
+            addNonlinear_b(residual, current_x); // Add non-linear currents
+
+            // Subtract A*x from b_full+I_nl to get -(A*x - (b_full+I_nl)) = -f(x)
+            for (size_t r = 0; r < NumUnknowns; ++r) {
+                double Ax_r = 0;
+                for (size_t c = 0; c < NumUnknowns; ++c) {
+                    Ax_r += A[r][c] * current_x[c];
+                }
+                residual[r] -= Ax_r;
+            }
+
+            // --- Step 4: Solve J*dx = -f(x) ---
+            // Note: Our residual is already -f(x), so we solve J*dx = residual
+            if (!lu_decompose()) {
+                x = current_x;
+                failed++;
+                return;
+            }
+
+            std::array<double, NumUnknowns> delta_x;
+            lu_solve_rhs(residual, delta_x);
+
+            // --- Step 5: Apply Update and Check Convergence ---
+            double delta_norm = 0.0, x_norm = 0.0;
+            for (size_t j = 0; j < NumUnknowns; ++j) {
+                current_x[j] += delta_x[j];
+                if (j < NumNodes) {
+                    delta_norm += delta_x[j] * delta_x[j];
+                    x_norm += current_x[j] * current_x[j];
+                }
+            }
+            delta_norm = std::sqrt(delta_norm);
+            x_norm = std::sqrt(x_norm);
+
+            if (delta_norm < (x_norm * REL_TOL + ABS_TOL)) {
+                x = current_x;
+                converged++;
+                return; // Converged!
+            }
+        }
+        diverged++;
+        x = current_x; // Store result even if loop timed out
     }
 };

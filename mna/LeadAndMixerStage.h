@@ -103,6 +103,23 @@ private:
         stampCapacitor_b(V_N002, GND, cap_z_state[12]);
     }
 
+    void stampDynamic_b(double in, std::array<double, NumUnknowns>& b_vector) override {
+        stampVoltageSource_b_vector(0, in, b_vector);
+        stampCapacitor_b_vector(V_N027, GND, cap_z_state[0], b_vector);
+        stampCapacitor_b_vector(V_N001, V_N009, cap_z_state[1], b_vector);
+        stampCapacitor_b_vector(V_N002, V_N001, cap_z_state[2], b_vector);
+        stampCapacitor_b_vector(V_N011, V_N001, cap_z_state[3], b_vector);
+        stampCapacitor_b_vector(V_N035, GND, cap_z_state[4], b_vector);
+        stampCapacitor_b_vector(V_N035, V_N029, cap_z_state[5], b_vector);
+        stampCapacitor_b_vector(V_N018, V_N017, cap_z_state[6], b_vector);
+        stampCapacitor_b_vector(V_N030, GND, cap_z_state[7], b_vector);
+        stampCapacitor_b_vector(V_N034, GND, cap_z_state[8], b_vector);
+        stampCapacitor_b_vector(V_N026, V_N025, cap_z_state[9], b_vector);
+        stampCapacitor_b_vector(V_N002, V_N026, cap_z_state[10], b_vector);
+        stampCapacitor_b_vector(V_N002, GND, cap_z_state[11], b_vector);
+        stampCapacitor_b_vector(V_N002, GND, cap_z_state[12], b_vector);
+    }
+
     void stampNonLinear(const std::array<double, NumUnknowns>& x) override {
         // Calculate the state of each triode ONCE.
         Triode::State ts1b = Triode::calculate(x[V_N009]-x[V_N027], x[V_N020]-x[V_N027]);
@@ -146,6 +163,50 @@ private:
         stampCurrentSource(V_N030, V_N034, i_g4a_lin);
     }
 
+        // Stamps ONLY the Jacobian (conductances)
+    void stampNonLinear_A(const std::array<double, NumUnknowns>& x) override {
+        // V1B
+        Triode::State ts1b = Triode::calculate(x[V_N009]-x[V_N027], x[V_N020]-x[V_N027]);
+        stampConductance(V_N009, V_N027, ts1b.g_p);
+        A[V_N009][V_N020]+=ts1b.g_g; A[V_N009][V_N027]-=ts1b.g_g;
+        A[V_N027][V_N020]-=ts1b.g_g; A[V_N027][V_N027]+=ts1b.g_g;
+        stampConductance(V_N020, V_N027, ts1b.g_ig);
+        // V3B
+        Triode::State ts3b = Triode::calculate(x[V_N017]-x[V_N035], x[V_N029]-x[V_N035]);
+        stampConductance(V_N017, V_N035, ts3b.g_p);
+        A[V_N017][V_N029]+=ts3b.g_g; A[V_N017][V_N035]-=ts3b.g_g;
+        A[V_N035][V_N029]-=ts3b.g_g; A[V_N035][V_N035]+=ts3b.g_g;
+        stampConductance(V_N029, V_N035, ts3b.g_ig);
+        // V4A
+        Triode::State ts4a = Triode::calculate(x[V_N025]-x[V_N034], x[V_N030]-x[V_N034]);
+        stampConductance(V_N025, V_N034, ts4a.g_p);
+        A[V_N025][V_N030]+=ts4a.g_g; A[V_N025][V_N034]-=ts4a.g_g;
+        A[V_N034][V_N030]-=ts4a.g_g; A[V_N034][V_N034]+=ts4a.g_g;
+        stampConductance(V_N030, V_N034, ts4a.g_ig);
+    }
+
+    // Adds ONLY the pure non-linear currents
+    void addNonlinear_b(std::array<double, NumUnknowns>& b, const std::array<double, NumUnknowns>& x) const override {
+        // V1B
+        Triode::State ts1b = Triode::calculate(x[V_N009]-x[V_N027], x[V_N020]-x[V_N027]);
+        b[V_N009] += ts1b.ip;
+        b[V_N027] -= ts1b.ip;
+        b[V_N020] += ts1b.ig;
+        b[V_N027] -= ts1b.ig;
+        // V3B
+        Triode::State ts3b = Triode::calculate(x[V_N017]-x[V_N035], x[V_N029]-x[V_N035]);
+        b[V_N017] += ts3b.ip;
+        b[V_N035] -= ts3b.ip;
+        b[V_N029] += ts3b.ig;
+        b[V_N035] -= ts3b.ig;
+        // V4A
+        Triode::State ts4a = Triode::calculate(x[V_N025]-x[V_N034], x[V_N030]-x[V_N034]);
+        b[V_N025] += ts4a.ip;
+        b[V_N034] -= ts4a.ip;
+        b[V_N030] += ts4a.ig;
+        b[V_N034] -= ts4a.ig;
+    }
+
 public:
     LeadAndMixerStage() : cap_z_state(13, 0.0) {
         R7=1.5e3; R8=100e3; R9=100e3; R10=3.3e6; R11=680e3; R21=680e3; R22=475e3;
@@ -165,8 +226,9 @@ public:
     }
 
     double process(double in) {
-        solveNonlinear_Adaptive(in);
         // solveNonlinear(in);
+        // solveNonlinear_Adaptive(in);
+        solveNonlinear_Real(in);
         updateCapacitorState(x[V_N027], 0, C13, cap_z_state[0]);
         updateCapacitorState(x[V_N001], x[V_N009], C7, cap_z_state[1]);
         updateCapacitorState(x[V_N002], x[V_N001], C10, cap_z_state[2]);

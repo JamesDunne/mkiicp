@@ -40,7 +40,7 @@ public:
         // return out_v1a;
 
         double out_lead = leadAndMixer.process(out_v1a);
-        // return out_lead;
+        return out_lead;
 
         double out_v2b = v2b.process(out_lead);
         // return out_v2b;
