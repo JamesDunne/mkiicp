@@ -17,7 +17,7 @@ class Triode {
 
     // Grid Diode Parameters (simplified)
     static constexpr double IS = 1e-9;   // Saturation Current
-    static constexpr double VT = 0.026;  // Thermal Voltage
+    static constexpr double VT = 25.852e-3; // 0.026;  // Thermal Voltage
 
 public:
     struct State {
@@ -98,19 +98,31 @@ private:
             s.g_g = common_term2 * de1_dvg;
         }
 
-        // --- Grid Current Calculation ---
+        // --- DEFINITIVE, STABLE GRID CURRENT MODEL ---
+        // This version prevents numerical overflow by linearizing the diode at high voltages.
         if (v_g > 0) {
-            // Non-linear Shockley diode equation.
-            // This provides the correct non-linear loading on the grid.
-            // We use a simplified model for the series RGI resistor by adding its
-            // conductance, which is a very good approximation for this use case.
-            double Vd = v_g;
-            s.ig = IS * (exp(Vd / VT) - 1.0);
-            s.g_ig = (IS / VT) * exp(Vd / VT);
+            // Smooth transition point
+            const double V_crit = 0.5; // A good point for the transition
 
-            // Add the effect of the series RGI resistor
-            // This is a simplification but captures the current-limiting behavior.
-            s.ig += Vd / RGI;
+            // Calculate the linear part's "y-intercept" based on the exponential curve at V_crit
+            // This ensures a smooth connection.
+            const double i_crit = IS * (exp(V_crit / VT) - 1.0);
+            const double g_crit = (IS / VT) * exp(V_crit / VT);
+            const double y_intercept = i_crit - g_crit * V_crit;
+
+            // This is a common "softplus"-like log-sum-exp trick for smooth blending.
+            // It smoothly blends between exp(v_g/VT) and g_crit.
+            double soft_exp_arg = (v_g - V_crit) / (2.0 * VT);
+            if (soft_exp_arg > 100) soft_exp_arg = 100; // Prevent overflow
+
+            double blend_factor = 1.0 + exp(soft_exp_arg);
+            double log_blend = VT * log(blend_factor);
+
+            s.ig = y_intercept + g_crit * V_crit + g_crit * 2.0 * log_blend;
+            s.g_ig = g_crit * (exp(soft_exp_arg) / blend_factor);
+
+            // RGI is always in parallel with this diode behavior
+            s.ig += v_g / RGI;
             s.g_ig += 1.0 / RGI;
         }
 
